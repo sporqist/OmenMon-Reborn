@@ -28,9 +28,18 @@ namespace OmenMon.Tests.Fakes {
         public FanArray Fans { get; }
         public Platform Platform { get; }
 
+        // Before anything else: this process must never open the BIOS or the EC driver
+        static TestRig() {
+            Hw.Isolated = true;
+        }
+
         public TestRig() {
 
+            Hw.Isolated = true;
             Config.LocaleInit();
+
+            // Sensor timestamps follow the simulated clock
+            PlatformClock.Source = () => this.Bios.Now;
 
             this.BiosCtl = new BiosCtl(this.Bios);
 
@@ -61,9 +70,9 @@ namespace OmenMon.Tests.Fakes {
                 new EcComponent(p.SwitchReg, RW, B, int.MaxValue, this.Ec),
                 p.ManualValueOn, p.ManualValueOff, this.BiosCtl);
 
-            EcComponent cput = new EcComponent(FakeEcRegisters.CpuTempRegister, R, B, Config.MaxBelievableTemperature, this.Ec);
+            EcComponent cput = new EcTemperatureComponent(FakeEcRegisters.CpuTempRegister, Config.MaxBelievableTemperature, this.Ec);
             cput.SetName("CPUT");
-            EcComponent gptm = new EcComponent(FakeEcRegisters.GpuTempRegister, R, B, Config.MaxBelievableTemperature, this.Ec);
+            EcComponent gptm = new EcTemperatureComponent(FakeEcRegisters.GpuTempRegister, Config.MaxBelievableTemperature, this.Ec);
             gptm.SetName("GPTM");
             WmiBiosTemperatureComponent bios = new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, this.BiosCtl);
 
@@ -71,6 +80,19 @@ namespace OmenMon.Tests.Fakes {
                 new IPlatformReadComponent[] { cput, gptm, bios },
                 new bool[] { true, true, false });
 
+        }
+
+        // Moves the simulated time
+        public void Advance(int seconds) {
+            this.Bios.Advance(TimeSpan.FromSeconds(seconds));
+        }
+
+        // Adds a fan program to the configuration (replacing one of the same name)
+        public static void AddProgram(string name, params (byte Temperature, byte Cpu, byte Gpu)[] rows) {
+            var levels = new SortedDictionary<byte, byte[]>();
+            foreach(var row in rows)
+                levels[row.Temperature] = new byte[] { row.Cpu, row.Gpu };
+            Config.FanProgram[name] = new FanProgramData(name, BiosData.FanMode.Default, BiosData.GpuPowerLevel.Max, levels);
         }
 
         // Sets both the EC CPU sensor and the BIOS 0x23 sensor

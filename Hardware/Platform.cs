@@ -206,7 +206,7 @@ namespace OmenMon.Hardware.Platform {
                             register = preset.TempGpuReg;
                             overridden = true;
                         }
-                        EcComponent comp = new EcComponent(
+                        EcComponent comp = new EcTemperatureComponent(
                             register,
                             Config.MaxBelievableTemperature);
                         if(overridden)
@@ -331,6 +331,70 @@ namespace OmenMon.Hardware.Platform {
             this.LastGpuTemperature = gpu;
             return this.LastGpuTemperature;
 
+        }
+
+        // How old a temperature reading may be before the fan logic stops trusting it
+        public static TimeSpan ReadingMaxAge {
+            get { return TimeSpan.FromSeconds(Config.TemperatureMaxAge); }
+        }
+
+        // Highest fresh valid reading among the sensors with the given name
+        private SensorReading GetFreshReading(string name, DateTime now) {
+            SensorReading best = SensorReading.None;
+            for(int i = 0; i < this.Temperature.Length; i++) {
+                if(this.Temperature[i].GetName() != name)
+                    continue;
+                SensorReading r = this.Temperature[i].GetReading();
+                if(r.IsFresh(now, ReadingMaxAge) && (!best.HasValue || r.Value > best.Value))
+                    best = r;
+            }
+            return best;
+        }
+
+        private static SensorReading Hotter(SensorReading a, SensorReading b) {
+            if(!a.HasValue) return b;
+            if(!b.HasValue) return a;
+            return b.Value > a.Value ? b : a;
+        }
+
+        // CPU temperature for control decisions: the higher of the fresh CPUT and BIOS
+        // readings (same max() policy as GetCpuTemperature), or SensorReading.None if
+        // neither sensor produced a valid reading within ReadingMaxAge. Callers must
+        // treat None as "unknown", never as cold.
+        public SensorReading GetCpuReading(bool forceUpdate = false) {
+            if(forceUpdate)
+                UpdateTemperature(false);
+            DateTime now = PlatformClock.UtcNow;
+            return Hotter(GetFreshReading("CPUT", now), GetFreshReading("BIOS", now));
+        }
+
+        // GPU temperature for control decisions, or SensorReading.None when GPTM has no
+        // fresh valid reading — which is also what a parked (powered-off) GPU gives
+        public SensorReading GetGpuReading(bool forceUpdate = false) {
+            if(forceUpdate)
+                UpdateTemperature(false);
+            return GetFreshReading("GPTM", PlatformClock.UtcNow);
+        }
+
+        // Hottest fresh reading among the CPU sensors, the GPU sensor and every sensor
+        // used for the maximum temperature. SensorReading.None if the CPU itself has no
+        // fresh reading: without it the system state is unknown, whatever else reads.
+        public SensorReading GetHottestReading(bool forceUpdate = false) {
+            if(forceUpdate)
+                UpdateTemperature(false);
+            DateTime now = PlatformClock.UtcNow;
+            SensorReading cpu = GetCpuReading(false);
+            if(!cpu.HasValue)
+                return SensorReading.None;
+            SensorReading hottest = Hotter(cpu, GetFreshReading("GPTM", now));
+            for(int i = 0; i < this.Temperature.Length; i++) {
+                if(!this.TemperatureUse[i])
+                    continue;
+                SensorReading r = this.Temperature[i].GetReading();
+                if(r.IsFresh(now, ReadingMaxAge))
+                    hottest = Hotter(hottest, r);
+            }
+            return hottest;
         }
 
         // Reports whether this platform has demonstrated a usable GPU temperature

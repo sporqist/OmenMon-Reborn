@@ -9,6 +9,44 @@ using OmenMon.Library;
 
 namespace OmenMon.Hardware.Platform {
 
+    // Time source for sensor readings (UTC). Production uses the system clock;
+    // tests substitute a simulated one.
+    public static class PlatformClock {
+
+        internal static Func<DateTime> Source = () => DateTime.UtcNow;
+
+        public static DateTime UtcNow { get { return Source(); } }
+
+    }
+
+    // The last valid value of a sensor and when it was taken. A failed or implausible
+    // read never produces a reading, so "no reading" can never be mistaken for 0 °C.
+    // Callers decide how old a reading may be (IsFresh) before they stop trusting it.
+    public readonly struct SensorReading {
+
+        public readonly int Value;
+        public readonly DateTime TakenAt;  // UTC; default(DateTime) when there is none
+
+        public SensorReading(int value, DateTime takenAt) {
+            this.Value = value;
+            this.TakenAt = takenAt;
+        }
+
+        public static readonly SensorReading None = default(SensorReading);
+
+        public bool HasValue { get { return this.TakenAt != default(DateTime); } }
+
+        // True if there is a reading and it is no older than maxAge at the given time
+        public bool IsFresh(DateTime now, TimeSpan maxAge) {
+            return this.HasValue && now - this.TakenAt <= maxAge;
+        }
+
+        public override string ToString() {
+            return this.HasValue ? this.Value + " @ " + this.TakenAt.ToString("HH:mm:ss") : "none";
+        }
+
+    }
+
     // Defines a common interface for all platform components
     public interface IPlatformComponent {
 
@@ -46,6 +84,10 @@ namespace OmenMon.Hardware.Platform {
 
         // Updates the sensor value
         public bool Update();
+
+        // Retrieves the last valid value and when it was read
+        // (SensorReading.None if no read has ever been valid)
+        public SensorReading GetReading();
 
     }
 
@@ -131,6 +173,23 @@ namespace OmenMon.Hardware.Platform {
         protected int LastValue;
         protected int PreviousValue;
 
+        // Last read that succeeded and passed IsValidValue(), and when it happened.
+        // Unlike LastValue (what the UI shows, which drops to 0 after repeated zero
+        // reads for legacy reasons), this never changes on a failed or implausible read.
+        protected SensorReading LastReading;
+
+        // Retrieves the last valid reading
+        public virtual SensorReading GetReading() {
+            AssertHasAccess(PlatformData.AccessType.Read);
+            return this.LastReading;
+        }
+
+        // Whether a successfully read value is a real measurement. By default anything
+        // within the constraint is; temperature sensors are stricter (0 is not a reading).
+        protected virtual bool IsValidValue(int value) {
+            return value <= this.Constraint;
+        }
+
         // Checks whether a read or write operation is valid for the component
         protected virtual void AssertHasAccess(PlatformData.AccessType access) {
             if(!this.AccessType.HasFlag(access))
@@ -162,8 +221,12 @@ namespace OmenMon.Hardware.Platform {
 
             try {
 
-                // Read the value
-                int value = Read();
+                // Read the value, noting whether the read itself succeeded
+                bool readOk = TryRead(out int value);
+
+                // Record a valid reading regardless of the display logic below
+                if(readOk && IsValidValue(value))
+                    this.LastReading = new SensorReading(value, PlatformClock.UtcNow);
 
                 // Hold off on one additional time
                 // for values that might be intermittently zeroed
@@ -210,6 +273,14 @@ namespace OmenMon.Hardware.Platform {
 
         // Implements component value retrieval
         protected abstract int Read();
+
+        // Implements component value retrieval, reporting whether the read succeeded.
+        // A failed read yields the same value Read() returns for it (0 for the EC on a
+        // lock timeout), so the display logic in Update() is unchanged.
+        protected virtual bool TryRead(out int value) {
+            value = Read();
+            return true;
+        }
 
         // Required due to inheritance, and implemented here so that
         // it does not have to be repeated in every derived class,
@@ -294,12 +365,34 @@ namespace OmenMon.Hardware.Platform {
             return value;
         }
 
+        // Reads a value from the Embedded Controller, reporting a lock failure
+        protected override bool TryRead(out int value) {
+            return TryReadRegister(out value);
+        }
+
         // Writes a value to the Embedded Controller
         protected override void Write(int value) {
             if(this.Size == PlatformData.DataSize.Byte)
                 this.Registers.TryWriteByte(this.Register, (byte) value);
             else
                 this.Registers.TryWriteWord(this.Register, (ushort) value);
+        }
+
+    }
+
+    // Implements an Embedded Controller temperature sensor. A reading is only valid if the
+    // EC lock was obtained and the value is a plausible temperature: 0 is what a failed
+    // read, a parked GPU and an unpopulated register all return, so it is never treated
+    // as a measurement; values above the constraint (0xFF and similar firmware bytes)
+    // are not either.
+    public class EcTemperatureComponent : EcComponent {
+
+        public EcTemperatureComponent(byte register, int constraint, IEcRegisters registers = null)
+            : base(register, PlatformData.AccessType.Read, PlatformData.DataSize.Byte, constraint, registers) {
+        }
+
+        protected override bool IsValidValue(int value) {
+            return value > 0 && value <= this.Constraint;
         }
 
     }
@@ -335,6 +428,12 @@ namespace OmenMon.Hardware.Platform {
         // Reads a temperature value from the BIOS
         protected override int Read() {
             return Hw.BiosGet((this.bios ?? Hw.Bios).GetTemperature);
+        }
+
+        // A failed BIOS call reads as 0 (the output buffer stays zeroed), so as for the
+        // EC sensors 0 is not a reading
+        protected override bool IsValidValue(int value) {
+            return value > 0 && value <= this.Constraint;
         }
 
     }

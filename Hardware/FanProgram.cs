@@ -234,55 +234,26 @@ namespace OmenMon.Hardware.Platform {
             if(!this.IsEnabled || this.IsSuspended)
                 return false;
 
-            // Read individual CPU and GPU temperatures.
-            // GetCpuTemperature updates all sensors once; GetGpuTemperature
-            // re-reads the cached values without a second hardware pass.
-            byte cpuTemp = Platform.GetCpuTemperature(true);
-            byte gpuTemp = Platform.GetGpuTemperature(false);
+            // Read the CPU and GPU temperatures as validated readings: a failed or
+            // implausible read is "no reading", never 0 °C. GetCpuReading(true)
+            // updates all sensors once; GetGpuReading() reuses that pass.
+            SensorReading cpu = Platform.GetCpuReading(true);
+            SensorReading gpu = Platform.GetGpuReading(false);
 
-            // GPU-temperature fallback for boards without a real GPU temp sensor.
-            // The two cases we need to distinguish when gpuTemp == 0:
-            //   (a) discrete GPU exists but is currently powered off (issue #66) —
-            //       want the GPU fan to stay at the idle row of the curve, NOT
-            //       ramp up under CPU load.
-            //   (b) board has no usable GPU temp sensor at all (issue #62) — want
-            //       the GPU fan to track CPU temp so it never sits idle while
-            //       the system actually needs cooling.
-            // Platform.HasObservedGpuTemperature() returns true once GPTM has
-            // produced a single non-zero reading since startup, which is the
-            // honest discriminator: a real sensor latches the flag true on its
-            // first valid sample, after which subsequent zero readings are
-            // unambiguously the GPU-powered-off case (a) and the fallback stays
-            // skipped. Without the flag ever latching, case (b) holds and the
-            // fallback fires. This is the corrected version of the v1.4.2 check
-            // — the original `HasGpuTemperatureSensor()` matched against the
-            // configured sensor list, which the default OmenMon.xml always
-            // populated with "GPTM" regardless of hardware (Copilot review #1
-            // on the v1.4.2 PR).
-            if(gpuTemp == 0 && !this.Platform.HasObservedGpuTemperature()) gpuTemp = cpuTemp;
+            // Pick the levels (see SelectLevels for the unknown-temperature rules)
+            byte[] fans = SelectLevels(cpu, gpu, out bool safeLevel);
 
-            // Independent level lookups: each fan reacts to its own
-            // component's temperature instead of the global maximum.
-            byte cpuLevel = GetTemperatureLevel(cpuTemp);
-            byte gpuLevel = GetTemperatureLevel(gpuTemp);
-
-            // Assemble the fan speed array: CPU fan speed from the CPU-temp
-            // level row, GPU fan speed from the GPU-temp level row.
-            byte[] cpuFans = GetFanLevel(cpuLevel);
-            byte[] gpuFans = GetFanLevel(gpuLevel);
-            byte[] fans = new byte[] { cpuFans[0], gpuFans[1] };
-
-            // Keep GetMaxTemperature populated for thermal-panic and tray icon
+            // Keep GetMaxTemperature populated for the tray icon
             // (sensors are already up-to-date, no extra EC reads)
             Platform.GetMaxTemperature(false);
 
             // Report both temperatures so the user can see independent tracking
-            Status(Severity.Notice,
+            Status(safeLevel ? Severity.Important : Severity.Notice,
                 Config.Locale.Get(Config.L_PROG + "T") + " "
-                + "CPU " + Conv.GetString(cpuTemp, 2, 10) + Config.Locale.Get(Config.L_UNIT + "Temperature")
-                + " GPU " + Conv.GetString(gpuTemp, 2, 10) + Config.Locale.Get(Config.L_UNIT + "Temperature") + " "
+                + "CPU " + FormatReading(cpu) + " GPU " + FormatReading(gpu) + " "
                 + Config.Locale.Get(Config.L_PROG + "Fans") + " "
-                + Conv.GetString(fans[0], 2, 10) + ", " + Conv.GetString(fans[1], 2, 10));
+                + Conv.GetString(fans[0], 2, 10) + ", " + Conv.GetString(fans[1], 2, 10)
+                + (safeLevel ? " (" + Config.Locale.Get(Config.L_PROG + "SensorUnknown") + ")" : ""));
 
             // Set fan levels
             SetFanLevel(fans);
@@ -305,6 +276,48 @@ namespace OmenMon.Hardware.Platform {
 #endregion
 
 #region Private Methods
+        // Chooses the fan levels for the current readings. Each fan follows its own
+        // component's temperature, except:
+        //   * No fresh CPU reading (EC lock timeouts, WMI failure, implausible values for
+        //     longer than Platform.ReadingMaxAge): the temperature is unknown, so both
+        //     fans get the program's highest row. Unknown is treated as hot, never as
+        //     cold — previously a failed read was 0 °C and selected the lowest row
+        //     (possibly 0/0, fans off) and re-sent it every program tick.
+        //   * No fresh GPU reading (parked dGPU reads 0, a board without a GPU sensor, a
+        //     failed read): the GPU fan follows the CPU temperature. This replaces the
+        //     issue #66 rule that left the GPU fan on the 0 °C row whenever the GPU had
+        //     once been seen and then read 0 — on boards whose fans share heat pipes that
+        //     idled the GPU fan under full CPU load.
+        internal byte[] SelectLevels(SensorReading cpu, SensorReading gpu, out bool safeLevel) {
+
+            if(!cpu.HasValue) {
+                safeLevel = true;
+                byte[] top = GetFanLevel(this.Levels[this.Levels.Count - 1]);
+                return new byte[] { top[0], top[1] };
+            }
+
+            safeLevel = false;
+            byte cpuTemp = ClampTemperature(cpu.Value);
+            byte gpuTemp = gpu.HasValue ? ClampTemperature(gpu.Value) : cpuTemp;
+
+            // CPU fan speed from the CPU-temperature row,
+            // GPU fan speed from the GPU-temperature row
+            byte[] cpuFans = GetFanLevel(GetTemperatureLevel(cpuTemp));
+            byte[] gpuFans = GetFanLevel(GetTemperatureLevel(gpuTemp));
+            return new byte[] { cpuFans[0], gpuFans[1] };
+
+        }
+
+        private static byte ClampTemperature(int value) {
+            return (byte) Math.Max(0, Math.Min(byte.MaxValue, value));
+        }
+
+        // Formats a reading for the status line ("--" when there is none)
+        private static string FormatReading(SensorReading reading) {
+            return (reading.HasValue ? Conv.GetString((uint) reading.Value, 2, 10) : "--")
+                + Config.Locale.Get(Config.L_UNIT + "Temperature");
+        }
+
         // Obtains the fan levels for the given temperature level
         private byte[] GetFanLevel(byte level) {
 

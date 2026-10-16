@@ -373,6 +373,7 @@ namespace OmenMon.Library.Locale {
                 ["ProgFans"] = "Fans",
                 ["ProgLvl"] = "Lvl",
                 ["ProgT"] = "T",
+                ["ProgSensorUnknown"] = "temperature unknown: safe level",
                 ["ProgSubMax"] = "max",
 
                 // Units

@@ -368,6 +368,12 @@ namespace OmenMon.Library {
         // Maximum believable temperature value when reading from the Embedded Controller
         public const int MaxBelievableTemperature = 99;
 
+        // How old a temperature reading may be [s] before fan control treats the sensor
+        // as unknown (and thus unsafe). Longer than the fan-program interval (15 s) so a
+        // single failed read does not count, short enough that a sensor which stopped
+        // reading is noticed within a few program ticks.
+        public const int TemperatureMaxAge = 45;
+
         // nVidia Display Container service name
         public const string NvDisplayContainerService = "NVDisplay.ContainerLocalSystem";
 

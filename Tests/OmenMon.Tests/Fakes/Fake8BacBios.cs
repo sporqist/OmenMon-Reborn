@@ -38,6 +38,9 @@ namespace OmenMon.Tests.Fakes {
         // When set, every call fails client-side (rc -1), like a broken WMI session
         public bool FailAll { get; set; }
 
+        // Command types that fail client-side (rc -1)
+        public HashSet<uint> FailTypes { get; } = new HashSet<uint>();
+
         // Every call, in order: (command type, input payload)
         public List<(uint Type, byte[] Data)> Calls { get; } = new List<(uint, byte[])>();
 
@@ -94,7 +97,7 @@ namespace OmenMon.Tests.Fakes {
             this.Calls.Add((commandType, data));
             outData = new byte[outDataSize];
 
-            if(this.FailAll)
+            if(this.FailAll || this.FailTypes.Contains(commandType))
                 return -1;
 
             if(command != BiosData.Cmd.Default)
