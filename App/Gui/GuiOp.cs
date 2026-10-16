@@ -331,7 +331,7 @@ namespace OmenMon.AppGui {
         public void ClearThermalPanic() {
             if(IsThermalPanic) {
                 IsThermalPanic = false;
-                Platform.Fans.SetMax(false);
+                Platform.Fans.SetPanic(false);
             }
         }
 
@@ -346,7 +346,7 @@ namespace OmenMon.AppGui {
             if(!Config.ThermalPanicEnabled) {
                 if(IsThermalPanic) {
                     IsThermalPanic = false;
-                    Platform.Fans.SetMax(false);
+                    Platform.Fans.SetPanic(false);
                 }
                 return;
             }
@@ -357,8 +357,13 @@ namespace OmenMon.AppGui {
 
             if(!IsThermalPanic && panic) {
 
+                // Level-based: every fan write is raised to the fan-table maximum and the
+                // monitor re-sends it on every pass (Fans.Supervise). Max Fan (0x27) is
+                // not used: it is ignored on 8BAC, freezes the EC on the
+                // FanArray.HasMaxFanFreeze boards and has been linked to firmware
+                // hibernation on battery.
                 IsThermalPanic = true;
-                Platform.Fans.SetMax(true);
+                Platform.Fans.SetPanic(true);
 
                 string tempStr = Config.TemperatureUseFahrenheit
                     ? ((maxTemp * 9 / 5) + 32) + "°F (" + maxTemp + "°C)"
@@ -375,7 +380,7 @@ namespace OmenMon.AppGui {
                 if(!panic) {
 
                     IsThermalPanic = false;
-                    Platform.Fans.SetMax(false);
+                    Platform.Fans.SetPanic(false);
 
                     string tempStr = Config.TemperatureUseFahrenheit
                         ? ((maxTemp * 9 / 5) + 32) + "°F (" + maxTemp + "°C)"

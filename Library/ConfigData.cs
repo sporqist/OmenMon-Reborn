@@ -110,13 +110,17 @@ namespace OmenMon.Library {
         // GuiTimerInterval, no EC traffic.
         public static bool AcFlickerPassivePoll = true;
 
-        // Thermal Panic Mode: when max sensor temperature exceeds the threshold, OmenMon
-        // forces both fans to maximum and shows a balloon alert. Deactivates with hysteresis.
-        // Only active when GuiDynamicIcon=true (requires live sensor reads already happening).
-        // Default is false (opt-in) to prevent false triggers or BIOS interference.
-        public static bool ThermalPanicEnabled = false;
-        public static byte ThermalPanicTemperature = 90;  // activate at [°C]
-        public static byte ThermalPanicHysteresis  =  5;  // deactivate at (threshold - this)
+        // Thermal Panic Mode: when the hottest valid temperature reading reaches the
+        // threshold, OmenMon raises both fans to the fan-table maximum (fan levels, not
+        // the Max Fan toggle) on every monitor pass and shows a balloon alert. It clears
+        // at threshold - hysteresis on a valid reading only; missing readings never clear
+        // it. Works with or without the dynamic icon (the monitor samples while enabled).
+        // DECISION TO REVIEW: now on by default, at 95 °C clearing at 85 °C (was off,
+        // 90/5: these CPUs run at 90-100 °C under sustained load, so 90 would trigger
+        // during ordinary gaming).
+        public static bool ThermalPanicEnabled = true;
+        public static byte ThermalPanicTemperature = 95;  // activate at [°C]
+        public static byte ThermalPanicHysteresis  = 10;  // deactivate at (threshold - this)
 
         // Display temperature in Fahrenheit instead of Celsius
         public static bool TemperatureUseFahrenheit = false;

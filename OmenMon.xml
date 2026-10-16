@@ -63,11 +63,14 @@
         <FanDataPipeServer>true</FanDataPipeServer>
         <!-- Display temperatures in Fahrenheit instead of Celsius (default: false) -->
         <TemperatureUseFahrenheit>false</TemperatureUseFahrenheit>
-        <!-- Thermal Panic Mode: force max fans + balloon alert when temperature threshold is reached -->
-        <!-- REQUIRES GuiDynamicIcon=true. Set to true only after verifying your sensors report realistic values. -->
-        <ThermalPanicEnabled>false</ThermalPanicEnabled>
-        <ThermalPanicTemperature>90</ThermalPanicTemperature>
-        <ThermalPanicHysteresis>5</ThermalPanicHysteresis>
+        <!-- Thermal Panic Mode: when the hottest valid temperature reading reaches
+             ThermalPanicTemperature [°C], both fans are raised to the fan-table maximum
+             (re-sent on every monitor pass) and a balloon alert is shown. Clears at
+             ThermalPanicTemperature - ThermalPanicHysteresis; a sensor that does not read
+             never clears it. Does not need GuiDynamicIcon. -->
+        <ThermalPanicEnabled>true</ThermalPanicEnabled>
+        <ThermalPanicTemperature>95</ThermalPanicTemperature>
+        <ThermalPanicHysteresis>10</ThermalPanicHysteresis>
         <!-- Color Backlight -->
         <!-- Note: two default entries are hard-coded in the application
              and will appear if there is nothing else to show instead -->
