@@ -37,11 +37,21 @@ namespace OmenMon.Hardware.Ec {
                     return MutexAcl.Create(false, name, out _, security);
 #endif
                 } catch(UnauthorizedAccessException) {
+                    // The mutex exists and its ACL does not let us create-or-open it with
+                    // full control: open it for waiting AND releasing. Synchronize alone
+                    // (the previous request) lets WaitOne() succeed but makes ReleaseMutex()
+                    // fail with UnauthorizedAccessException — which Release() swallows — so
+                    // the first acquisition was never released: this process kept
+                    // Global\Access_EC owned until the owning thread exited, and every other
+                    // thread and process waited it out. Modify is the right ReleaseMutex()
+                    // needs (MUTEX_MODIFY_STATE). If the ACL grants Synchronize but not
+                    // Modify, the open now fails and EC access reports lock timeouts instead
+                    // of silently holding the lock forever.
                     try {
 #if NETFRAMEWORK
-                        return Mutex.OpenExisting(name, MutexRights.Synchronize);
+                        return Mutex.OpenExisting(name, MutexRights.Synchronize | MutexRights.Modify);
 #else
-                        return MutexAcl.OpenExisting(name, MutexRights.Synchronize);
+                        return MutexAcl.OpenExisting(name, MutexRights.Synchronize | MutexRights.Modify);
 #endif
                     } catch {
                     }
