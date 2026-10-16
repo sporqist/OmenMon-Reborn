@@ -30,10 +30,19 @@ namespace OmenMon.Hardware.Ec {
                         new MutexAccessRule(
                             new SecurityIdentifier(WellKnownSidType.WorldSid, null),
                             MutexRights.FullControl, AccessControlType.Allow));
+#if NETFRAMEWORK
                     return new Mutex(false, name, out _, security);
+#else
+                    // .NET (Core) has no Mutex constructor or OpenExisting() overload taking ACLs
+                    return MutexAcl.Create(false, name, out _, security);
+#endif
                 } catch(UnauthorizedAccessException) {
                     try {
+#if NETFRAMEWORK
                         return Mutex.OpenExisting(name, MutexRights.Synchronize);
+#else
+                        return MutexAcl.OpenExisting(name, MutexRights.Synchronize);
+#endif
                     } catch {
                     }
                 }

@@ -8,7 +8,7 @@
 -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFrameworks>net48;net10.0-windows</TargetFrameworks>
     <!-- <AllowUnsafeBlocks>true</AllowUnsafeBlocks> -->
     <ApplicationIcon>Resources\Icon.ico</ApplicationIcon>
     <ApplicationManifest>OmenMon.manifest</ApplicationManifest>
@@ -19,22 +19,41 @@
     <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
     <ErrorReport>prompt</ErrorReport>
     <LangVersion>latest</LangVersion>
+    <!-- net48 builds to Bin\ as before; other targets to Bin\<TargetFramework>\ -->
     <OutputPath>Bin\</OutputPath>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendTargetFrameworkToOutputPath Condition="'$(TargetFramework)' == 'net48'">false</AppendTargetFrameworkToOutputPath>
     <OutputType>WinExe</OutputType>
     <PlatformTarget>x64</PlatformTarget>
     <ProjectGuid>{F6104868-81A7-4D09-8AD2-8CF261D58319}</ProjectGuid>
     <RootNamespace>OmenMon</RootNamespace>
     <StartupObject>OmenMon.App</StartupObject>
     <WarningLevel>4</WarningLevel>
-    <!-- Assembly attributes come from All\Meta.cs and All\Version.cs (or the AddVersion target below) -->
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Assembly attributes come from All\Meta.cs and All\Version.cs (or the AddVersion target below);
+         the SDK only generates the platform attributes (SupportedOSPlatform etc.) for net10.0-windows -->
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
+    <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
+    <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
+    <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
+    <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+    <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
+    <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
     <!-- OmenMon.exe.config is deliberately not deployed (see the file), so do not generate one -->
     <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
     <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.4.11.0</AssemblyVersion>
     <AssemblyVersionWord Condition="'$(AssemblyVersionWord)' == ''">reborn</AssemblyVersionWord>
     <!-- The test project lives below this directory; keep its sources out of the default globs -->
     <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;wiki\**;docs\**</DefaultItemExcludes>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <UseWindowsForms>true</UseWindowsForms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <SelfContained>false</SelfContained>
+    <!-- Binding redirects do not apply to .NET (Core) -->
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <!-- WFO1000: designer code serialization (no designer files here);
+         WFO0003: DPI awareness stays in OmenMon.manifest, shared with net48 -->
+    <NoWarn>$(NoWarn);WFO1000;WFO0003</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugType>full</DebugType>
@@ -44,11 +63,9 @@
     <DebugType>none</DebugType>
     <Optimize>true</Optimize>
   </PropertyGroup>
-  <ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <!-- Reference assemblies so net48 builds without the targeting pack installed -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
-  </ItemGroup>
-  <ItemGroup>
     <Reference Include="Microsoft.CSharp" />
     <!-- Ships with Windows (GAC); the SDK does not search the GAC, so point at it directly -->
     <Reference Include="Microsoft.Management.Infrastructure">
@@ -58,6 +75,11 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <!-- 3.0.0 is the official .NET (Core) build; 4.0.0 is an unofficial repackage of the
+         .NET Framework assembly that fails at runtime (no Microsoft.Management.Infrastructure.Native) -->
+    <PackageReference Include="Microsoft.Management.Infrastructure" Version="3.0.0" />
   </ItemGroup>
   <ItemGroup>
     <!-- Accessor class is All\Resources.cs; all entries are byte arrays (no BinaryFormatter) -->

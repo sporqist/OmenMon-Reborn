@@ -344,7 +344,7 @@ namespace OmenMon.AppGui {
             catch(Exception ex) { Log("Save error: " + ex.Message); }
 
             if(ChkOpenIssue.Checked) {
-                try { Process.Start("https://github.com/seakyy/OmenMon-Reborn/issues/new"); }
+                try { Process.Start(new ProcessStartInfo { FileName = "https://github.com/seakyy/OmenMon-Reborn/issues/new", UseShellExecute = true }); }
                 catch { }
             }
 

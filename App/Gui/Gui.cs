@@ -95,6 +95,11 @@ namespace OmenMon.AppGui {
                // Default rendering settings
                Application.EnableVisualStyles();
                Application.SetCompatibleTextRenderingDefault(false);
+#if !NETFRAMEWORK
+               // Keep the .NET Framework default font (.NET uses Segoe UI 9pt),
+               // which the form layouts and AutoScaleDimensions are designed for
+               Application.SetDefaultFont(new Font(new FontFamily("Microsoft Sans Serif"), 8.25f));
+#endif
 
                // Register a custom message to communicate between application instances
                // The identifier obtained this way remains unique until user logout

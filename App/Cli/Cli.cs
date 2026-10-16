@@ -154,6 +154,7 @@ namespace OmenMon.AppCli {
 
         // Relaunches the process as a console application
         public static void Relaunch(string[] args) {
+#if NETFRAMEWORK
             byte[] data;
 
             // Read the image of our own process into an array
@@ -176,6 +177,19 @@ namespace OmenMon.AppCli {
 
             // Note: this is still not enough to run as a proper console application
             // Would need to launch a separate process or perhaps Assembly.LoadFile()
+#else
+            // On .NET (Core), Config.AppFile is the native application host
+            // (or a single-file bundle), not a managed image that can be loaded,
+            // so run what the reloaded copy would (the App.Main branch for an
+            // instance that does not own the CLI lock) in place instead
+            try {
+                Initialize();
+                PrintHeader();
+                CliOp.Loop(args);
+            } catch(Exception e) {
+                App.Error("ErrUnexpected|EXCEPTION", e);
+            }
+#endif
 
         }
 
