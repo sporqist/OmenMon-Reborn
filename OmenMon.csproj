@@ -6,157 +6,63 @@
      //  https://omenmon.github.io/
 
 -->
-<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
     <!-- <AllowUnsafeBlocks>true</AllowUnsafeBlocks> -->
     <ApplicationIcon>Resources\Icon.ico</ApplicationIcon>
     <ApplicationManifest>OmenMon.manifest</ApplicationManifest>
     <AssemblyName>OmenMon</AssemblyName>
     <AssemblyVersionFile>All\Version.cs</AssemblyVersionFile>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
-    <CoreCompileDependsOn>PrepareResources;$(CompileDependsOn)</CoreCompileDependsOn>
     <Deterministic>true</Deterministic>
     <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
     <ErrorReport>prompt</ErrorReport>
-    <IntermediateOutputPath>Obj</IntermediateOutputPath>
-    <LangVersion>11.0</LangVersion>
-    <OutputPath>Bin</OutputPath>
+    <LangVersion>latest</LangVersion>
+    <OutputPath>Bin\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputType>WinExe</OutputType>
-    <Platform>x64</Platform>
     <PlatformTarget>x64</PlatformTarget>
     <ProjectGuid>{F6104868-81A7-4D09-8AD2-8CF261D58319}</ProjectGuid>
     <RootNamespace>OmenMon</RootNamespace>
     <StartupObject>OmenMon.App</StartupObject>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <WarningLevel>4</WarningLevel>
+    <!-- Assembly attributes come from All\Meta.cs and All\Version.cs (or the AddVersion target below) -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- OmenMon.exe.config is deliberately not deployed (see the file), so do not generate one -->
+    <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
     <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.4.11.0</AssemblyVersion>
     <AssemblyVersionWord Condition="'$(AssemblyVersionWord)' == ''">reborn</AssemblyVersionWord>
+    <!-- The test project lives below this directory; keep its sources out of the default globs -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;wiki\**;docs\**</DefaultItemExcludes>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DefineDebug>true</DefineDebug>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
     <Optimize>true</Optimize>
   </PropertyGroup>
-  <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>
-    <None Include="OmenMon.config" />
-    <None Include="OmenMon.manifest" />
-    <None Include="Packages.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="$(AssemblyVersionFile)" />
-    <Compile Include="All\Meta.cs" />
-    <Compile Include="App\App.cs" />
-    <Compile Include="App\Cli\Cli.cs" />
-    <Compile Include="App\Cli\CliBios.cs" />
-    <Compile Include="App\Cli\CliEc.cs" />
-    <Compile Include="App\Cli\CliProg.cs" />
-    <Compile Include="App\Cli\CliTask.cs" />
-    <Compile Include="App\Cli\CliOp.cs" />
-    <Compile Include="App\Cli\CliOpBios.cs" />
-    <Compile Include="App\Cli\CliOpEc.cs" />
-    <Compile Include="App\Cli\CliOpProg.cs" />
-    <Compile Include="App\Cli\CliOpProbe.cs" />
-    <Compile Include="App\Cli\CliOpCalibration.cs" />
-    <Compile Include="App\Cli\CliOpDiag.cs" />
-    <Compile Include="App\Cli\CliOpTask.cs" />
-    <Compile Include="App\Crash.cs" />
-    <Compile Include="App\Gui\Gui.cs" />
-    <Compile Include="App\Gui\GuiOp.cs" />
-    <Compile Include="App\Gui\GuiFilter.cs" />
-    <Compile Include="App\Gui\GuiFormAbout.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="App\Gui\GuiFormMain.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="App\Gui\GuiFormMainInit.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="App\Gui\GuiIcon.cs" />
-    <Compile Include="App\Gui\GuiMenu.cs" />
-    <Compile Include="App\Gui\GuiMonitor.cs" />
-    <Compile Include="App\Gui\GuiFormCalibration.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="App\Gui\GuiCalibrationProcessGuard.cs" />
-    <Compile Include="App\Gui\GuiKbd.cs" />
-    <Compile Include="App\Gui\GuiTray.cs" />
-    <Compile Include="Driver\PawnIo.cs" />
-    <Compile Include="Driver\Ring0.cs" />
-    <Compile Include="External\AdvApi.cs" />
-    <Compile Include="External\ColorMgmt.cs" />
-    <Compile Include="External\Gdi.cs" />
-    <Compile Include="External\Kernel.cs" />
-    <Compile Include="External\PowrProf.cs" />
-    <Compile Include="External\ShellCore.cs" />
-    <Compile Include="External\TaskSchd.cs" />
-    <Compile Include="External\User.cs" />
-    <Compile Include="External\WinBase.cs" />
-    <Compile Include="Hardware\Bios.cs" />
-    <Compile Include="Hardware\BiosCtl.cs" />
-    <Compile Include="Hardware\BiosData.cs" />
-    <Compile Include="Hardware\Ec.cs" />
-    <Compile Include="Hardware\EcData.cs" />
-    <Compile Include="Hardware\EcMutex.cs" />
-    <Compile Include="Hardware\EcDiffScanner.cs" />
-    <Compile Include="Hardware\Fan.cs" />
-    <Compile Include="Hardware\FanArray.cs" />
-    <Compile Include="Hardware\FanProgram.cs" />
-    <Compile Include="Hardware\AutoDetector.cs" />
-    <Compile Include="Hardware\Platform.cs" />
-    <Compile Include="Hardware\PlatformComponent.cs" />
-    <Compile Include="Hardware\PlatformData.cs" />
-    <Compile Include="Hardware\PlatformPreset.cs" />
-    <Compile Include="Hardware\Settings.cs" />
-    <Compile Include="Library\AutoCal.cs" />
-    <Compile Include="Library\FanDataPipeServer.cs" />
-    <Compile Include="Library\Config.cs" />
-    <Compile Include="Library\ConfigData.cs" />
-    <Compile Include="Library\Conv.cs" />
-    <Compile Include="Library\EcTrace.cs" />
-    <Compile Include="Library\PowerGuard.cs" />
-    <Compile Include="Library\Gui\ButtonEx.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Include="Library\Gui\GdiFont.cs" />
-    <Compile Include="Library\Gui\ColorDlgEx.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Include="Library\Gui\ProgressBarEx.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Include="Library\Hw.cs" />
-    <Compile Include="Library\Locale.cs" />
-    <Compile Include="Library\LocaleData.cs" />
-    <Compile Include="Library\OnlyOnce.cs" />
-    <Compile Include="Library\Os.cs" />
-    <Compile Include="Library\WmiEvent.cs" />
-    <Compile Include="Library\WmiInfo.cs" />
+    <!-- Reference assemblies so net48 builds without the targeting pack installed -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Microsoft.CSharp" />
-    <Reference Include="Microsoft.Management.Infrastructure" />
-    <Reference Include="System" />
+    <!-- Ships with Windows (GAC); the SDK does not search the GAC, so point at it directly -->
+    <Reference Include="Microsoft.Management.Infrastructure">
+      <HintPath>$(WINDIR)\Microsoft.NET\assembly\GAC_MSIL\Microsoft.Management.Infrastructure\v4.0_1.0.0.0__31bf3856ad364e35\Microsoft.Management.Infrastructure.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="OmenMon.resx">
-      <Generator>MSBuild:Compile</Generator>
-      <LastGenOutput>$(IntermediateOutputPath)Resources.cs</LastGenOutput>
+    <!-- Accessor class is All\Resources.cs; all entries are byte arrays (no BinaryFormatter) -->
+    <EmbeddedResource Update="OmenMon.resx">
       <LogicalName>OmenMon.Resources.resources</LogicalName>
-      <StronglyTypedFileName>$(IntermediateOutputPath)Resources.cs</StronglyTypedFileName>
-      <StronglyTypedLanguage>CSharp</StronglyTypedLanguage>
-      <StronglyTypedNamespace>OmenMon</StronglyTypedNamespace>
-      <StronglyTypedClassName>Resources</StronglyTypedClassName>
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\LpcACPIEC.bin" Condition="Exists('Resources\LpcACPIEC.bin')">
       <LogicalName>OmenMon.LpcACPIEC.bin</LogicalName>
@@ -186,8 +92,6 @@
       <Compile Remove="$(AssemblyVersionFile)" />
       <Compile Include="$(IntermediateOutputPath)Version.cs" />
     </ItemGroup>
-  </Target>
-  <Target Name="BuildBeginning" BeforeTargets="BeforeBuild">
   </Target>
   <Target Name="EnsurePawnBlobForRelease" BeforeTargets="BeforeBuild" Condition="'$(Configuration)' == 'Release'">
     <Error Condition="!Exists('Resources/LpcACPIEC.bin')" Text="Missing required file: Resources/LpcACPIEC.bin. Follow Resources/PAWN_BUILD.md to fetch/build it before creating a Release build." />
