@@ -171,6 +171,16 @@ namespace OmenMon.Library {
         public static int FanLevelMax = 55;
         public static int FanLevelMin = 20;
 
+        // Fan safety (Hardware/FanSafetyGuard.cs): every fan-level write keeps each fan at
+        // least at its floor level [rpm / 100] unless a fresh, valid CPU (and GPU, if it
+        // reads) temperature is below FanSafetyCoolTemperature [°C]. Even while cool, a
+        // manual level below the floor (Fan Off, constant minimum) is raised to the floor
+        // after FanOffMaxMinutes. DECISION TO REVIEW: defaults 20/22, 50 °C, 15 min.
+        public static byte FanSafetyFloorCpu = 20;
+        public static byte FanSafetyFloorGpu = 22;
+        public static int FanSafetyCoolTemperature = 50;
+        public static int FanOffMaxMinutes = 15;
+
         // Set manual fan mode first using the Embedded Controller before setting fan levels
         public static bool FanLevelNeedManual = false;
 

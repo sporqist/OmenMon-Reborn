@@ -116,6 +116,16 @@
         <!-- Minimum and maximum fan level thresholds [krpm] -->
         <FanLevelMax>55</FanLevelMax>
         <FanLevelMin>20</FanLevelMin>
+        <!-- Fan safety: every fan-level write (programs, constant speed, Fan Off, presets,
+             calibration, CLI) keeps each fan at least at its floor [rpm / 100, i.e. 20 =
+             2000 rpm] unless a fresh, valid CPU temperature (and GPU, if it reads) is below
+             FanSafetyCoolTemperature [°C]. An unreadable sensor never counts as cool, so the
+             fans are never off while warm. Even while cool, Fan Off and other manual levels
+             below the floor are raised to the floor after FanOffMaxMinutes. -->
+        <FanSafetyFloorCpu>20</FanSafetyFloorCpu>
+        <FanSafetyFloorGpu>22</FanSafetyFloorGpu>
+        <FanSafetyCoolTemperature>50</FanSafetyCoolTemperature>
+        <FanOffMaxMinutes>15</FanOffMaxMinutes>
         <!-- Before setting fan levels, set manual fan mode first using the Embedded Controller -->
         <FanLevelNeedManual>false</FanLevelNeedManual>
         <!-- Use the Embedded Controller instead of a BIOS call for fan-level setting -->

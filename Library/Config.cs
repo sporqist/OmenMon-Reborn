@@ -283,6 +283,21 @@ namespace OmenMon.Library {
                     if(GetWord(xml, XmlPrefix + "FanLevelMin", out value))
                         FanLevelMin = value;
 
+                    // Fan safety: floors below 10 (1000 rpm) would allow stopped or stalling
+                    // fans while warm and are rejected, as are cool thresholds outside
+                    // 30-70 °C and Fan Off limits outside 1-240 min (defaults are kept)
+                    if(GetWord(xml, XmlPrefix + "FanSafetyFloorCpu", out value) && value >= 10 && value <= 100)
+                        FanSafetyFloorCpu = (byte) value;
+
+                    if(GetWord(xml, XmlPrefix + "FanSafetyFloorGpu", out value) && value >= 10 && value <= 100)
+                        FanSafetyFloorGpu = (byte) value;
+
+                    if(GetWord(xml, XmlPrefix + "FanSafetyCoolTemperature", out value) && value >= 30 && value <= 70)
+                        FanSafetyCoolTemperature = value;
+
+                    if(GetWord(xml, XmlPrefix + "FanOffMaxMinutes", out value) && value >= 1 && value <= 240)
+                        FanOffMaxMinutes = value;
+
                     if(GetBool(xml, XmlPrefix + "FanLevelNeedManual", out flag))
                         FanLevelNeedManual = flag;
 
@@ -733,6 +748,10 @@ namespace OmenMon.Library {
                     SetUInt(xml, XmlPrefix + "FanCountdownExtendThreshold", (uint) FanCountdownExtendThreshold);
                     SetUInt(xml, XmlPrefix + "FanLevelMax", (uint) FanLevelMax);
                     SetUInt(xml, XmlPrefix + "FanLevelMin", (uint) FanLevelMin);
+                    SetUInt(xml, XmlPrefix + "FanSafetyFloorCpu", FanSafetyFloorCpu);
+                    SetUInt(xml, XmlPrefix + "FanSafetyFloorGpu", FanSafetyFloorGpu);
+                    SetUInt(xml, XmlPrefix + "FanSafetyCoolTemperature", (uint) FanSafetyCoolTemperature);
+                    SetUInt(xml, XmlPrefix + "FanOffMaxMinutes", (uint) FanOffMaxMinutes);
                     SetBool(xml, XmlPrefix + "FanLevelNeedManual", FanLevelNeedManual);
                     SetBool(xml, XmlPrefix + "FanLevelUseEc", FanLevelUseEc);
                     SetString(xml, XmlPrefix + "FanProgramDefault", FanProgramDefault);
