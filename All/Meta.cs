@@ -20,3 +20,6 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 [assembly: Guid("2C01055A-1511-CEDB-EEF5-EAF00D5A1AD5")]
 [assembly: NeutralResourcesLanguage("en")]
+
+// The test project builds platforms from simulated parts (Platform's internal constructor)
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("OmenMon.Tests")]

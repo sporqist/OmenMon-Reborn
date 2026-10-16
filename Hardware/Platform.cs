@@ -76,6 +76,23 @@ namespace OmenMon.Hardware.Platform {
 
         }
 
+        // Constructs a platform from ready-made parts, bypassing hardware discovery
+        // (WMI baseboard query, model database, AutoCal sidecar). Used by tests to run
+        // the fan logic against a simulated BIOS and EC.
+        internal Platform(
+            ISettings system,
+            IFanArray fans,
+            IPlatformReadComponent[] temperature,
+            bool[] temperatureUse) {
+
+            this.System = system;
+            this.Preset = PlatformPreset.Default;
+            this.Fans = fans;
+            this.Temperature = temperature;
+            this.TemperatureUse = temperatureUse;
+
+        }
+
         // Initializes the fan controls
         private void InitFans() {
 

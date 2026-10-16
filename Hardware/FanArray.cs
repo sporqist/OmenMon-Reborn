@@ -73,6 +73,10 @@ namespace OmenMon.Hardware.Platform {
         // Stores the fan on and off switch component
         protected IPlatformReadWriteComponent Switch;
 
+        // BIOS used for fan calls (the shared Hw.Bios unless a test substitutes one)
+        private readonly IBiosCtl bios;
+        protected IBiosCtl Bios { get { return this.bios ?? Hw.Bios; } }
+
         // Constructs a fan array instance
         public FanArray(
             IFan[] fan,
@@ -81,8 +85,10 @@ namespace OmenMon.Hardware.Platform {
             IPlatformReadWriteComponent fanMode,
             IPlatformReadWriteComponent fanSwitch,
             byte manualValueOn  = (byte) PlatformData.FanManual.On,
-            byte manualValueOff = (byte) PlatformData.FanManual.Off) {
+            byte manualValueOff = (byte) PlatformData.FanManual.Off,
+            IBiosCtl bios = null) {
 
+            this.bios = bios;
             this.ManualValueOn  = manualValueOn;
             this.ManualValueOff = manualValueOff;
 
@@ -123,7 +129,7 @@ namespace OmenMon.Hardware.Platform {
 
         // Retrieves the levels of all fans at the same time
         public byte[] GetLevels() {
-            return Hw.BiosGet(Hw.Bios.GetFanLevel);
+            return Hw.BiosGet(this.Bios.GetFanLevel);
         }
 
         // Sets the levels of all fans at the same time
@@ -145,7 +151,7 @@ namespace OmenMon.Hardware.Platform {
                 try {
 
                     // Make a WMI BIOS call to set the level of both fans
-                    Hw.BiosSet(Hw.Bios.SetFanLevel, levels);
+                    Hw.BiosSet(this.Bios.SetFanLevel, levels);
 
                 } catch {
 
@@ -173,12 +179,12 @@ namespace OmenMon.Hardware.Platform {
 
         // Retrieves the maximum fan speed status
         public bool GetMax() {
-            return Hw.BiosGet<bool>(Hw.Bios.GetMaxFan);
+            return Hw.BiosGet<bool>(this.Bios.GetMaxFan);
         }
 
         // Sets the maximum fan speed status
         public void SetMax(bool flag) {
-            Hw.BiosSet(Hw.Bios.SetMaxFan, flag);
+            Hw.BiosSet(this.Bios.SetMaxFan, flag);
         }
 
         // Retrieves the current fan mode
@@ -189,7 +195,7 @@ namespace OmenMon.Hardware.Platform {
 
         // Sets the current fan mode
         public void SetMode(BiosData.FanMode mode) {
-            Hw.BiosSet<BiosData.FanMode>(Hw.Bios.SetFanMode, mode);
+            Hw.BiosSet<BiosData.FanMode>(this.Bios.SetFanMode, mode);
             // Note: WMI BIOS call preferred over this.Mode.SetValue((byte) mode);
         }
 
@@ -205,7 +211,7 @@ namespace OmenMon.Hardware.Platform {
                 try {
 
                     // Use a BIOS call consistent with SetLevels when in BIOS fan level mode
-                    Hw.BiosSet(Hw.Bios.SetFanLevel, new byte[] { 0, 0 });
+                    Hw.BiosSet(this.Bios.SetFanLevel, new byte[] { 0, 0 });
 
                 } catch {
 

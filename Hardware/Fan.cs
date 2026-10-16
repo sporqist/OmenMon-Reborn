@@ -43,14 +43,20 @@ namespace OmenMon.Hardware.Platform {
         // Stores the speed data component
         protected IPlatformReadComponent Speed;
 
+        // BIOS used for level queries (the shared Hw.Bios unless a test substitutes one)
+        private readonly IBiosCtl bios;
+        protected IBiosCtl Bios { get { return this.bios ?? Hw.Bios; } }
+
         // Constructs a fan instance
         public Fan(
             BiosData.FanType type,
             IPlatformReadWriteComponent level,
             IPlatformReadComponent rateRead,
             IPlatformWriteComponent rateWrite,
-            IPlatformReadComponent speed) {
+            IPlatformReadComponent speed,
+            IBiosCtl bios = null) {
 
+            this.bios = bios;
             this.FanType = type;
             this.Level = level;
             this.RateRead = rateRead;
@@ -68,7 +74,7 @@ namespace OmenMon.Hardware.Platform {
 
         // Retrieves the fan level [krpm]
         public virtual int GetLevel() {
-            var levels = Hw.BiosGet(Hw.Bios.GetFanLevel);
+            var levels = Hw.BiosGet(this.Bios.GetFanLevel);
             if(levels == null || levels.Length < (int) this.FanType) return 0;
             return levels[(int) this.FanType - 1];
         }
