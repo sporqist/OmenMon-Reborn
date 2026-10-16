@@ -291,6 +291,15 @@ namespace OmenMon.Library {
             0x000000, 0x000000, 0xFFFFFF, 0x0FF760, 0x35CF00, 0xE7E53A, 0xD5A126, 0xFF1A06,
             0x000000, 0x000000, 0xFFFFFF, 0x05E0FD, 0x0660FE, 0x1B0DF9, 0x8000FF, 0xE71A9C };
 
+        // Eco+ (Power & Efficiency window): turbo boost off on battery (the active power
+        // scheme's DC value only; plugged in is unaffected) and, if EcoPlusRefreshRate is
+        // not 0, that refresh rate on battery (restored on AC, never saved as the mode).
+        // Every original value is kept in OmenMon-EcoPlus.state and restored when Eco+ is
+        // turned off. Measured on 8BAC (2026-10-16): boost off on battery 59.5 -> 39.2 W;
+        // 165 -> 60 Hz no measurable change.
+        public static bool EcoPlusEnabled = false;
+        public static int EcoPlusRefreshRate = 0;
+
         // Whether closing the window closes the whole application
         public static bool GuiCloseWindowExit = false;
 

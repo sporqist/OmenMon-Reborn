@@ -40,6 +40,13 @@ namespace OmenMon.AppGui {
         // the UI thread in GuiFormMain.UpdateFan, gated on RdoFanConst.Checked).
         internal volatile bool ConstantSpeedActive;
 
+        // Eco+ (Power & Efficiency window): battery-only efficiency settings, originals kept
+        // in OmenMon-EcoPlus.state next to the executable. Maintained from the GUI timer.
+        internal readonly EcoPlus EcoPlus = new EcoPlus(
+            new WindowsPowerPlan(), new RegistryGpuPreferences(), new DisplayRate(),
+            EcoPlusState.Load(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusState.FileName)),
+            EcoPlusOptions.FromConfig);
+
         // Last performance preset applied. Presets can share a BIOS mode (Eco and Quiet
         // both use thermal policy 3), so the reported mode alone cannot tell which one
         // is active. Written under HardwareLock, read by the UI for display.

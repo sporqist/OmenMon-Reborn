@@ -328,10 +328,28 @@ namespace OmenMon.AppGui {
         }
 
         // Handles a timer tick
+        private PowerLineStatus EcoPlusLastLine = PowerLineStatus.Unknown;
+        private int EcoPlusTicks = int.MaxValue / 2;
+
+        private void MaintainEcoPlus() {
+            try {
+                PowerLineStatus line = SystemInformation.PowerStatus.PowerLineStatus;
+                if(line == this.EcoPlusLastLine && ++this.EcoPlusTicks < 60)
+                    return;
+                this.EcoPlusLastLine = line;
+                this.EcoPlusTicks = 0;
+                this.Op?.EcoPlus?.Maintain(line == PowerLineStatus.Offline);
+            } catch { }
+        }
+
         private void EventTimerTick(object sender, EventArgs e) {
 
             // Perform the updates as scheduled
             Update();
+
+            // Eco+: on a power source change, and every minute (the power scheme may
+            // have been switched). Cheap powrprof calls; a refresh-rate change is rare.
+            MaintainEcoPlus();
 
             // Drain any PowerModeChanged StatusChange signal raised (possibly
             // off-thread) by EventPowerChange. Handling it here keeps every

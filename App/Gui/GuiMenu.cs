@@ -113,6 +113,7 @@ namespace OmenMon.AppGui {
         private const string I_EXIT = Gui.M_ACT + "Exit";
         private const string I_CONTRIBUTE = Gui.M_ACT + "ContributeHwData";
         private const string I_COPY_DIAG = Gui.M_ACT + "CopyDiag";
+        private const string I_POWER = Gui.M_ACT + "Power";
 
         // Menu tag identifiers
         internal const string MENU_TAG_PERSIST = "Persist";
@@ -142,6 +143,16 @@ namespace OmenMon.AppGui {
 #endregion
 
 #region Menu Action Events
+        // Opens the Power & Efficiency window (power draw and its causes, Eco+)
+        private void EventActionPower(object sender, EventArgs e) {
+            try {
+                GuiFormPower.ShowWindow(Context.Op?.EcoPlus);
+            } catch(Exception ex) {
+                MessageBox.Show("Could not open Power & Efficiency: " + ex.Message,
+                    Config.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         // Launches the Auto-Calibration Wizard. The wizard runs the fans through a
         // multi-step profile, dumps the EC at each step, and identifies the RPM tach
         // registers heuristically — replacing the old manual "paste a dump on GitHub"
@@ -952,6 +963,7 @@ namespace OmenMon.AppGui {
                 MenuKbd,
                 MenuSettings,
                 new ToolStripSeparator(),
+                new ToolStripMenuItem("Power && Efficiency...", null, EventActionPower, I_POWER),
                 new ToolStripMenuItem("Auto-Calibrate && Diagnose...", null, EventActionAutoCalibrate, I_CONTRIBUTE),
                 new ToolStripMenuItem("Copy Diagnostic Info", null, EventActionCopyDiag, I_COPY_DIAG),
                 new ToolStripSeparator(),
