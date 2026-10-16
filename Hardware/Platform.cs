@@ -349,6 +349,18 @@ namespace OmenMon.Hardware.Platform {
 
         }
 
+        // The EC register of the GPU temperature (GPTM) for a product, resolved as in
+        // InitTemperature(): the model's TempGpuReg override, else the configured GPTM
+        // sensor if it reads the EC; 0 if there is none
+        public static byte GpuTemperatureRegister(string product) {
+            if(product != null && Config.Models.ContainsKey(product) && Config.Models[product].TempGpuReg != 0)
+                return Config.Models[product].TempGpuReg;
+            if(Config.TemperatureSensor.ContainsKey("GPTM")
+                && Config.TemperatureSensor["GPTM"].Source == PlatformData.LinkType.EmbeddedController)
+                return Config.TemperatureSensor["GPTM"].Register;
+            return 0;
+        }
+
         // How old a temperature reading may be before the fan logic stops trusting it
         public static TimeSpan ReadingMaxAge {
             get { return TimeSpan.FromSeconds(Config.TemperatureMaxAge); }

@@ -4,6 +4,7 @@
 
 using System;
 using OmenMon.Hardware.Bios;
+using OmenMon.Hardware.Ec;
 using OmenMon.Hardware.Platform;
 using OmenMon.Library;
 
@@ -108,7 +109,8 @@ namespace OmenMon.AppCli {
 
                 // The same fan-safety rules as for every other fan-level write: a floor
                 // unless the system is known to be cool. The CLI runs no sensor sweep,
-                // so the CPU temperature is the BIOS one (WMI 0x23, no EC access).
+                // so the CPU temperature is the BIOS one (WMI 0x23) and the GPU one a
+                // single EC read, if the EC opens.
                 byte[] requested = levelValue;
                 levelValue = CliFanSafetyGuard().Filter(requested);
                 if(levelValue[0] != requested[0] || levelValue[1] != requested[1])
@@ -124,7 +126,9 @@ namespace OmenMon.AppCli {
             }
         }
 
-        // A fan-safety guard judged on the BIOS CPU temperature, for one CLI command
+        // A fan-safety guard judged on the BIOS CPU temperature and the EC GPU
+        // temperature, for one CLI command. Judging the CPU alone let a warm-curve
+        // level be picked for a 59 °C CPU while the GPU was hotter (2026-10-16 test).
         private static FanSafetyGuard CliFanSafetyGuard() {
             DateTime now = DateTime.UtcNow;
             SensorReading cpu = SensorReading.None;
@@ -133,8 +137,40 @@ namespace OmenMon.AppCli {
                 if(t > 0 && t <= Config.MaxBelievableTemperature)
                     cpu = new SensorReading(t, now);
             } catch { }
+            SensorReading gpu = CliGpuReading(now);
             return new FanSafetyGuard(FanSafetyPolicy.FromConfig(),
-                () => cpu, () => SensorReading.None, () => now);
+                () => cpu, () => gpu, () => now);
+        }
+
+        // The GPU temperature from one EC read, or SensorReading.None if the EC does
+        // not open or the GPU reads 0 (parked). Quiet on failure: a missing GPU
+        // reading only means the guard judges on the CPU, as before.
+        private static SensorReading CliGpuReading(DateTime now) {
+            if(Hw.Isolated)
+                return SensorReading.None;
+            try {
+                byte register = Platform.GpuTemperatureRegister(new Settings().GetProduct());
+                if(register == 0)
+                    return SensorReading.None;
+
+                // Reuse an EC opened by an earlier -Ec context; otherwise open one just for this
+                bool own = Hw.Ec == null || !Hw.Ec.IsInitialized;
+                IEmbeddedController ec = own ? EmbeddedController.Instance : Hw.Ec;
+                if(ec == null)
+                    return SensorReading.None;
+                try {
+                    if(own)
+                        ec.Initialize();
+                    if(ec.IsInitialized
+                        && Hw.TryEcExec<byte>(e => e.ReadByte(register), ec, out byte t)
+                        && t > 0 && t <= Config.MaxBelievableTemperature)
+                        return new SensorReading(t, now);
+                } finally {
+                    if(own)
+                        ec.Close();
+                }
+            } catch { }
+            return SensorReading.None;
         }
 
         // Sets the BIOS LED animation table based on the values parsed from the command line
