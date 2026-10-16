@@ -115,7 +115,8 @@ namespace OmenMon.Tests {
             // No refresh from OmenMon: the level expires and the BIOS curve resumes
             rig.Advance(124);
             Assert.Equal(rig.Bios.CurveLevels, rig.Bios.MeasuredLevels);
-            rig.Advance(6);
+            Assert.False(rig.Fans.HeartbeatAllowed);
+            rig.Advance(26);
             Assert.True(rig.Fans.HeartbeatAllowed);
         }
 

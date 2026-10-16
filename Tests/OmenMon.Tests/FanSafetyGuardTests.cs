@@ -161,7 +161,7 @@ namespace OmenMon.Tests {
             Assert.True(g.HeartbeatAllowed);
             g.RecordRelease();
             Assert.False(g.HeartbeatAllowed);
-            Advance(TimeSpan.FromSeconds(129));
+            Advance(TimeSpan.FromSeconds(149));
             Assert.False(g.HeartbeatAllowed);
             Advance(TimeSpan.FromSeconds(1));
             Assert.True(g.HeartbeatAllowed);
