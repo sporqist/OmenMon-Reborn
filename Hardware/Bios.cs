@@ -32,6 +32,22 @@ namespace OmenMon.Hardware.Bios {
             byte[] inData);
 
     }
+
+    // Defines the raw BIOS call as a seam: a command and command type plus an input
+    // payload go in, a return code and an output payload come out. Bios implements it
+    // over WMI (CIM); tests substitute a simulated BIOS so the fan logic built on top
+    // of BiosCtl can be exercised without hardware. Return codes follow Bios.Send():
+    // 0 = success, -1 = client-side failure, anything else = BIOS status code.
+    public interface IBiosTransport {
+
+        public int Send(
+            BiosData.Cmd command,
+            uint commandType,
+            byte[] inData,
+            byte outDataSize,
+            out byte[] outData);
+
+    }
 #endregion
 
     // Provides for BIOS call error handling
@@ -43,10 +59,14 @@ namespace OmenMon.Hardware.Bios {
 
     // Implements the functionality for making BIOS calls via CIM (WMI)
     // Builds up on the BIOS data values and structures defined earlier
-    public class Bios : BiosData, IBios {
+    public class Bios : BiosData, IBios, IBiosTransport {
 
 #region Constants & Variables
         public bool IsInitialized { get; protected set; }
+
+        // Alternative transport; null (the default, and always the case for the
+        // singleton instances) means calls go to the BIOS over WMI as before
+        protected IBiosTransport Transport;
 
         private CimSession session;
         private CimInstance biosData, biosMethods;
@@ -114,6 +134,10 @@ namespace OmenMon.Hardware.Bios {
             byte[] inData,
             byte outDataSize, // One of 0, 4, 128, 1024, or 4096 only
             out byte[] outData) {
+
+            // Hand the call to the alternative transport, if one was supplied
+            if(this.Transport != null)
+                return this.Transport.Send(command, commandType, inData, outDataSize, out outData);
 
             // Initialize the output variable
             outData = new byte[outDataSize];

@@ -94,6 +94,14 @@ namespace OmenMon.Hardware.Bios {
         public new static BiosCtl Instance {
             get { return instance; }
         }
+
+        // Creates a separate instance whose calls go to the given transport instead of
+        // WMI (a simulated BIOS in tests). The command encoding in every method below is
+        // shared with the production singleton, so what is tested is what is sent.
+        public BiosCtl(IBiosTransport transport) {
+            this.Transport = transport ?? throw new ArgumentNullException(nameof(transport));
+            this.IsInitialized = true;
+        }
 #endregion
 
 #region Backlight Control Methods
