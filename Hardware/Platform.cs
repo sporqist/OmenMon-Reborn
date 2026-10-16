@@ -47,6 +47,9 @@ namespace OmenMon.Hardware.Platform {
         public IPlatformReadComponent[] Temperature { get; private set; }
         public bool[] TemperatureUse { get; private set; }
 
+        // Whether UpdateTemperature() holds the live EC lock across the sensor sweep
+        private readonly bool BatchUnderEcLock = true;
+
         // Resolved per-model register layout. Set once in the ctor (after InitSystem)
         // and shared by InitFans / InitTemperature. Falls back to PlatformPreset.Default
         // for fan-related fields when the product isn't in the model database; for the
@@ -90,6 +93,9 @@ namespace OmenMon.Hardware.Platform {
             this.Fans = fans;
             this.Temperature = temperature;
             this.TemperatureUse = temperatureUse;
+
+            // The parts bring their own register access; never batch under the live EC
+            this.BatchUnderEcLock = false;
 
         }
 
@@ -393,7 +399,7 @@ namespace OmenMon.Hardware.Platform {
             // WMI BIOS temperature sensor (which never touches the EC) keeps refreshing;
             // the EC-backed sensors then degrade per-component exactly as they did before
             // the batch existed, rather than the whole tick being skipped.
-            if(!Hw.EcExecBatch(updateAll))
+            if(!this.BatchUnderEcLock || !Hw.EcExecBatch(updateAll))
                 updateAll();
         }
 #endregion

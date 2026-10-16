@@ -19,6 +19,11 @@ namespace OmenMon.Library {
         // State flag
         public static bool IsInitialized { get; private set; }
 
+        // Set by the test project: no BIOS session or EC driver may ever be opened
+        // from this process. BiosInterface() and EcInterface() then return null
+        // without touching WMI, PawnIO or the EC mutex (and without an error box).
+        internal static volatile bool Isolated;
+
         // Initializes the helper class
         public static void Initialize() {
 
@@ -66,6 +71,8 @@ namespace OmenMon.Library {
 
         // Returns the BIOS interface
         public static IBiosCtl BiosInterface() {
+            if(Isolated)
+                return null;
             var bios = BiosCtl.Instance;
             if(bios == null) {
                 App.Error("ErrBiosNull");
@@ -222,6 +229,8 @@ namespace OmenMon.Library {
 
         // Returns the Embedded Controller interface
         public static IEmbeddedController EcInterface() {
+            if(Isolated)
+                return null;
             var ec = EmbeddedController.Instance;
             if(ec == null) {
                 App.Error("ErrEcNull");

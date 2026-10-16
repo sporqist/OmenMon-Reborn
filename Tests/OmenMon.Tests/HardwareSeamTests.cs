@@ -15,6 +15,14 @@ namespace OmenMon.Tests {
     public class HardwareSeamTests {
 
         [Fact]
+        public void TestProcess_CannotOpenRealBiosOrEc() {
+            Assert.True(OmenMon.Library.Hw.Isolated);
+            Assert.Null(OmenMon.Library.Hw.EcInterface());
+            Assert.Null(OmenMon.Library.Hw.BiosInterface());
+            Assert.False(OmenMon.Library.Hw.EcExecBatch(() => throw new InvalidOperationException("must not run")));
+        }
+
+        [Fact]
         public void BiosCtl_EncodesFanLevelAsType2E() {
             var rig = new TestRig();
             rig.BiosCtl.SetFanLevel(new byte[] { 30, 33 });
