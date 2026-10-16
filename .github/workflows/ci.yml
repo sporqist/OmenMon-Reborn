@@ -16,6 +16,10 @@ on:
       - master
       - main
       - 'release/*'
+      # fork working branches (sporqist/OmenMon-Reborn)
+      - 'pr/**'
+      - 'exp/**'
+      - 'modern/**'
   pull_request:
     branches:
       - master
