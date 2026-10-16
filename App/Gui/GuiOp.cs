@@ -322,8 +322,10 @@ namespace OmenMon.AppGui {
             }
         }
 
-        // Checks temperature and activates or deactivates Thermal Panic Mode
-        public void CheckThermalPanic(byte maxTemp) {
+        // Checks temperature and activates or deactivates Thermal Panic Mode.
+        // Takes the hottest validated reading: a missing reading (failed, implausible or
+        // stale sensor reads) neither triggers nor clears panic.
+        public void CheckThermalPanic(SensorReading hottest) {
 
             // If panic is currently active but the feature has been disabled (e.g. user toggled
             // it off at runtime or the dynamic icon was turned off), clear the stuck state so
@@ -336,7 +338,11 @@ namespace OmenMon.AppGui {
                 return;
             }
 
-            if(!IsThermalPanic && maxTemp >= Config.ThermalPanicTemperature) {
+            bool panic = ThermalPanicPolicy.Next(IsThermalPanic, hottest,
+                Config.ThermalPanicTemperature, Config.ThermalPanicHysteresis);
+            int maxTemp = hottest.Value;
+
+            if(!IsThermalPanic && panic) {
 
                 IsThermalPanic = true;
                 Platform.Fans.SetMax(true);
@@ -352,14 +358,8 @@ namespace OmenMon.AppGui {
 
             } else if(IsThermalPanic) {
 
-                // Guard against Temperature=0 underflow; clamp hysteresis below threshold.
-                int maxHysteresis = Config.ThermalPanicTemperature == 0
-                    ? 0 : Config.ThermalPanicTemperature - 1;
-                int offThreshold = Config.ThermalPanicTemperature
-                    - Math.Min((int)Config.ThermalPanicHysteresis, maxHysteresis);
-
-                // Use <= so temperature normalized at exactly (threshold - hysteresis) clears
-                if(maxTemp <= offThreshold) {
+                // Clears at or below (threshold - hysteresis), see ThermalPanicPolicy
+                if(!panic) {
 
                     IsThermalPanic = false;
                     Platform.Fans.SetMax(false);

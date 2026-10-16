@@ -365,8 +365,12 @@ namespace OmenMon.Library {
         // Maximum believable percent value when reading from the Embedded Controller (used for fan rate)
         public const int MaxBelievablePercent = 100;
 
-        // Maximum believable temperature value when reading from the Embedded Controller
-        public const int MaxBelievableTemperature = 99;
+        // Maximum believable temperature value when reading a temperature sensor [°C].
+        // Was 99, which discarded every reading of 100 °C or more and kept showing (and
+        // acting on) the last value below it — exactly when the CPU is at its limit
+        // (Tjmax is 100 °C on many of these CPUs). Values above this (0xFF and other
+        // firmware bytes) are still not readings.
+        public const int MaxBelievableTemperature = 120;
 
         // How old a temperature reading may be [s] before fan control treats the sensor
         // as unknown (and thus unsafe). Longer than the fan-program interval (15 s) so a

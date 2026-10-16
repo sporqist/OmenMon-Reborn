@@ -479,11 +479,10 @@ namespace OmenMon.AppGui {
             if(sample) {
                 lock(op.HardwareLock) {
                     MonitorSnapshot s = Sample(formVisible || fullRequest, programRefreshedTemps);
-                    // Overtemperature protection runs on a fresh, hardware-verified reading
-                    // whenever it is enabled (or still latched and needs clearing) —
-                    // unchanged from the legacy icon-tick behaviour, just off the UI thread.
-                    // MaxTemp is sourced from GetMaxTemperature() (a byte), so the cast is safe.
-                    op.CheckThermalPanic((byte) s.MaxTemp);
+                    // Overtemperature protection runs on the hottest validated reading
+                    // (sensors were refreshed by Sample or the program tick just before);
+                    // with no valid reading it keeps its current state.
+                    op.CheckThermalPanic(op.Platform.GetHottestReading(false));
                     this.CurrentSnapshot = s;
                 }
             }
