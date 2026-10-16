@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 - **GPU power presets no longer write a peak temperature of 0.** `SetGpuPower` keeps the current threshold, or falls back to 87 °C (0x57), when a preset leaves it at 0.
+### Fixed
+
+- **Manual fan levels on boards that need a pre-call (8BAC).** `SetFanLevel` sends a fan count query (type 0x10, 1-byte input) right before the fan level call (type 0x2E), like the Linux hp-wmi driver. Harmless on boards that do not need it.
 
 ## [1.5.0-reborn] - 2026-09-19
 
