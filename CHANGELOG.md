@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Toolchain update:** tests on .NET 10 (LTS; .NET 8 support ends 2026-11-10) with xUnit v3 4.0.2 on Microsoft.Testing.Platform (`dotnet test --project Tests/OmenMon.Tests/OmenMon.Tests.csproj`; `global.json` opts in). CI and release workflows: runner image `windows-2025-vs2026`, actions updated to checkout v7.0.1, setup-dotnet v6.0.0, upload-artifact v7.0.2, download-artifact v8.0.2 and setup-msbuild v3, each pinned to its commit SHA; only the publishing job gets `contents: write`; signtool is located instead of using a fixed Windows SDK path that the new image does not have.
 - **SDK-style project:** `OmenMon.csproj` is now an SDK-style project targeting .NET Framework 4.8 (the shipped `Bin\OmenMon.exe`, with the same assembly name, resources, manifest and versioning) and .NET 10 (`Bin\net10.0-windows\`). It builds with the .NET SDK alone; CI and release builds use `dotnet build` instead of MSBuild. Icons and images are stored in the resources as byte arrays, so the build no longer needs BinaryFormatter. The tests reference the application project instead of link-compiling four of its source files.
+### Added
+
+- **HP OMEN 16-wf0xxx (`8BAC`):** native `<Model>` entry (mode register 0x59, CPU/GPU temperatures at 0xB2/0xB4, fan levels via the BIOS).
 
 ## [1.5.0-reborn] - 2026-09-19
 
