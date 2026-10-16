@@ -343,18 +343,17 @@ namespace OmenMon.AppGui {
         // Switches the fan mode
         private void EventActionFanMode(object sender, EventArgs e) {
 
-            // Retrieve the requested fan mode
-            BiosData.FanMode fanModeAsk = (BiosData.FanMode) Enum.Parse(
-                typeof(BiosData.FanMode),
-                ((ToolStripMenuItem) sender).Name.Remove(0, P_FAN_MODE.Length));
+            // Retrieve the requested performance preset (not a BIOS fan mode: see
+            // Hardware/PerformancePreset.cs)
+            PerformancePreset presetAsk;
+            if(!PerformancePresets.TryParse(
+                ((ToolStripMenuItem) sender).Name.Remove(0, P_FAN_MODE.Length), out presetAsk))
+                return;
 
             bool applied = false;
 
             // Serialise the read-modify-write with the monitor thread
             lock(Context.Op.HardwareLock) {
-
-                // Retrieve the current fan mode
-                BiosData.FanMode fanModeNow = Context.Op.Platform.Fans.GetMode();
 
                 // "Max Fan" is a separate BIOS toggle (SetMaxFan) from the fan mode
                 // (SetFanMode), and SetMode does not clear it — so choosing Auto/Default
@@ -374,41 +373,12 @@ namespace OmenMon.AppGui {
                 if(manualMaxReleased)
                     Context.Op.Platform.Fans.SetMax(false);
 
-                // Apply the requested mode if it differs, or re-assert it when Max Fan was
-                // just released, so the fans actually return to the automatic curve
-                // (mirrors the main-window "Automatic" path in GuiFormMain).
-                if(fanModeAsk != fanModeNow || manualMaxReleased || fanModeAsk == BiosData.FanMode.Eco) {
-                    Context.Op.Platform.Fans.SetMode(fanModeAsk);
-                    applied = true;
-
-                    // OMEN Gaming Hub Performance Options & Presets (#102):
-                    // ECO mode: Quiet thermal policy + GPU Min power + Low Refresh Rate (60Hz) + ~2800 RPM cap
-                    // Quiet mode: Quiet thermal policy + GPU Min power + ~3200 RPM cap
-                    // Default mode: Default thermal policy + GPU Med power + ~4000 RPM cap
-                    // Performance mode: Performance thermal policy + GPU Max power + Uncapped full RPM
-                    // Custom mode: Load saved custom parameters from OmenMon.xml
-                    try {
-                        if(fanModeAsk == BiosData.FanMode.Eco) {
-                            Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Min));
-                            Os.SetRefreshRate(Config.PresetRefreshRateLow);
-                            Context.Op.Platform.Fans.SetLevels(new byte[] { 28, 28 });
-                        } else if(fanModeAsk == BiosData.FanMode.Quiet || fanModeAsk == BiosData.FanMode.LegacyQuiet) {
-                            Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Min));
-                            Context.Op.Platform.Fans.SetLevels(new byte[] { 32, 32 });
-                        } else if(fanModeAsk == BiosData.FanMode.Default || fanModeAsk == BiosData.FanMode.LegacyDefault) {
-                            Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Med));
-                            Context.Op.Platform.Fans.SetLevels(new byte[] { 40, 40 });
-                        } else if(fanModeAsk == BiosData.FanMode.Performance || fanModeAsk == BiosData.FanMode.LegacyPerformance) {
-                            Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Max));
-                            Context.Op.Platform.Fans.SetLevels(new byte[] { 55, 55 });
-                        } else if(fanModeAsk == BiosData.FanMode.Custom) {
-                            if(Enum.TryParse(Config.CustomPresetGpuPower, true, out BiosData.GpuPowerLevel customGpu))
-                                Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(customGpu));
-                            if(Config.CustomPresetCpuLevel > 0 && Config.CustomPresetGpuLevel > 0)
-                                Context.Op.Platform.Fans.SetLevels(new byte[] { Config.CustomPresetCpuLevel, Config.CustomPresetGpuLevel });
-                        }
-                    } catch { }
-                }
+                // Apply the preset (BIOS mode, GPU power, refresh rate, levels). Always,
+                // not only when the BIOS mode differs: presets that share a mode (Eco and
+                // Quiet) differ in everything else, and re-asserting after Max Fan was
+                // released returns the fans to the preset.
+                Context.Op.ApplyPreset(presetAsk);
+                applied = true;
 
             }
 
@@ -889,9 +859,9 @@ namespace OmenMon.AppGui {
                 MenuFan.DropDownItems.Add(new ToolStripSeparator());
             }
 
-            // Continue with the remaining part of the fan menu: only clean OMEN presets (Eco, Quiet, Default, Performance, Custom)
-            List<string> cleanModes = new List<string> { "Eco", "Quiet", "Default", "Performance", "Custom" };
-            foreach(string name in cleanModes) {
+            // Continue with the remaining part of the fan menu: the performance presets
+            foreach(PerformancePreset preset in PerformancePresets.All) {
+                string name = PerformancePresets.GetName(preset);
                 MenuFan.DropDownItems.Add(new ToolStripMenuItem(
                     Config.Locale.Get(Config.L_GUI_MENU + P_FAN_MODE + name),
                     null, EventActionFanMode, P_FAN_MODE + name));
@@ -1027,8 +997,10 @@ namespace OmenMon.AppGui {
             if(s == null)
                 return;
 
-            // Retrieve the current fan mode
-            string fanModeNameNow = Enum.GetName(typeof(BiosData.FanMode), s.Mode);
+            // Retrieve the current performance preset (from the BIOS mode and the last
+            // preset applied, since presets can share a BIOS mode)
+            PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset);
+            string fanModeNameNow = presetNow.HasValue ? PerformancePresets.GetName(presetNow.Value) : "";
             string fanProgNameNow = s.ProgramName;
             bool isFanMax = s.Max;
             bool isFanProg = s.ProgramEnabled;

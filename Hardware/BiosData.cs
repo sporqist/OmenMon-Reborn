@@ -43,15 +43,19 @@ namespace OmenMon.Hardware.Bios {
             On  = 0xE4   // 0b11100100 - Keyboard backlight on
         }
 
-        // Fan performance mode
+        // Fan performance mode (BIOS thermal policy) as sent with command 0x1A.
         // Source: HP.Omen.Core.Common.PowerControl.PerformanceMode
+        // Only BIOS values belong here. The OMEN Gaming Hub style presets (Eco, Quiet,
+        // Default, Performance, Custom) are OmenMon's own and live in
+        // Hardware/PerformancePreset.cs; they resolve to these values. (Eco and Custom
+        // used to be members here: Eco aliased Quiet, so choosing Quiet ran the Eco
+        // preset, and Custom = 0x63 was sent to the BIOS as a mode.)
         public enum FanMode : byte {
             LegacyDefault     =  0,  // 0x00 = 0b00000000
             LegacyPerformance =  1,  // 0x01 = 0b00000001
             LegacyCool        =  2,  // 0x02 = 0b00000010
             LegacyQuiet       =  3,  // 0x03 = 0b00000011
-            Eco               =  3,  // 0x03 = 0b00000011 (OMEN Gaming Hub ECO mode: Quiet thermal policy + GPU Min + 60Hz)
-            Quiet             =  3,  // 0x03 = 0b00000011 (OMEN Gaming Hub Quiet mode)
+            Quiet             =  3,  // 0x03 = 0b00000011 (the OMEN Gaming Hub name of the same policy)
             LegacyExtreme     =  4,  // 0x04 = 0b00000100
             L8                =  4,  // 0x04 = 0b00000100
             L0                = 16,  // 0x10 = 0b00010000
@@ -64,8 +68,22 @@ namespace OmenMon.Hardware.Bios {
             L7                = 49,  // 0x31 = 0b00110001 
             L3                = 64,  // 0x40 = 0b01000000
             Cool              = 80,  // 0x50 = 0b01010000
-            L4                = 80,  // 0x50 = 0b01010000
-            Custom            = 99   // 0x63 = Custom user-defined preset
+            L4                = 80   // 0x50 = 0b01010000
+        }
+
+        // Parses a BIOS fan mode name, accepting only defined values (Enum.TryParse
+        // alone also accepts any number, e.g. "99"). "Eco", the name of the removed
+        // alias, is still read as LegacyQuiet so existing configuration files load.
+        public static bool TryParseFanMode(string name, out FanMode mode) {
+            mode = FanMode.Default;
+            if(string.IsNullOrEmpty(name))
+                return false;
+            if(name == "Eco") {
+                mode = FanMode.LegacyQuiet;
+                return true;
+            }
+            return Enum.TryParse(name, false, out mode)
+                && Enum.IsDefined(typeof(FanMode), mode);
         }
 
         // Fan type (per nibble)

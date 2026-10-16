@@ -452,11 +452,10 @@ namespace OmenMon.AppGui {
                 lock(Context.Op.HardwareLock)
                     Context.Op.Program.Terminate();
 
-                // Query the current and requested mode
-                BiosData.FanMode fanModeNow = Context.Op.Platform.Fans.GetMode();
-                BiosData.FanMode fanModeAsk = (BiosData.FanMode) Enum.Parse(
-                    typeof(BiosData.FanMode), 
-                    (string) this.CmbFanMode.SelectedValue);
+                // The requested performance preset (not a BIOS fan mode)
+                PerformancePreset presetAsk;
+                if(!PerformancePresets.TryParse((string) this.CmbFanMode.SelectedValue, out presetAsk))
+                    presetAsk = PerformancePreset.Default;
 
                 if(isFanOff) // Re-enable fan if off first
                     Context.Op.Platform.Fans.SetOff(false);
@@ -464,41 +463,17 @@ namespace OmenMon.AppGui {
                 if(isFanMax) // Disable maximum speed first
                     Context.Op.Platform.Fans.SetMax(false);
 
-                // Set the levels to 0xFF to clear any custom speed settings
-                Context.Op.Platform.Fans.SetLevels(new byte[] {Byte.MaxValue, Byte.MaxValue});
+                // Custom: remember the trackbar levels as the preset's levels. The BIOS
+                // mode stays the configured <CustomPreset><Mode> (this used to be
+                // overwritten with "Custom", sent to the BIOS as mode 0x63).
+                if(presetAsk == PerformancePreset.Custom) {
+                    Config.CustomPresetCpuLevel = (byte) this.TrkFan0Lvl.Value;
+                    Config.CustomPresetGpuLevel = (byte) this.TrkFan1Lvl.Value;
+                    Config.Save();
+                }
 
-                // Enable automatic fan in the selected mode
-                Context.Op.Platform.Fans.SetMode(fanModeAsk);
-
-                // OMEN Gaming Hub Performance Options & Presets (#102):
-                // ECO mode: Quiet thermal policy + GPU Min power + Low Refresh Rate (60Hz) + ~2800 RPM cap
-                // Quiet mode: Quiet thermal policy + GPU Min power + ~3200 RPM cap
-                // Default mode: Default thermal policy + GPU Med power + ~4000 RPM cap
-                // Performance mode: Performance thermal policy + GPU Max power + Uncapped full RPM
-                // Custom mode: Load & save custom parameters directly in OmenMon.xml
-                try {
-                    if(fanModeAsk == BiosData.FanMode.Eco) {
-                        Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Min));
-                        Os.SetRefreshRate(Config.PresetRefreshRateLow);
-                        Context.Op.Platform.Fans.SetLevels(new byte[] { 28, 28 });
-                    } else if(fanModeAsk == BiosData.FanMode.Quiet || fanModeAsk == BiosData.FanMode.LegacyQuiet) {
-                        Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Min));
-                        Context.Op.Platform.Fans.SetLevels(new byte[] { 32, 32 });
-                    } else if(fanModeAsk == BiosData.FanMode.Default || fanModeAsk == BiosData.FanMode.LegacyDefault) {
-                        Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Med));
-                        Context.Op.Platform.Fans.SetLevels(new byte[] { 40, 40 });
-                    } else if(fanModeAsk == BiosData.FanMode.Performance || fanModeAsk == BiosData.FanMode.LegacyPerformance) {
-                        Context.Op.Platform.System.SetGpuPower(new BiosData.GpuPowerData(BiosData.GpuPowerLevel.Max));
-                        Context.Op.Platform.Fans.SetLevels(new byte[] { 55, 55 });
-                    } else if(fanModeAsk == BiosData.FanMode.Custom) {
-                        Config.CustomPresetFanMode = "Custom";
-                        Config.CustomPresetCpuLevel = (byte) this.TrkFan0Lvl.Value;
-                        Config.CustomPresetGpuLevel = (byte) this.TrkFan1Lvl.Value;
-                        Config.Save();
-                        if(Config.CustomPresetCpuLevel > 0 && Config.CustomPresetGpuLevel > 0)
-                            Context.Op.Platform.Fans.SetLevels(new byte[] { Config.CustomPresetCpuLevel, Config.CustomPresetGpuLevel });
-                    }
-                } catch { }
+                // Hand back any OmenMon-held levels, then apply the preset
+                Context.Op.ApplyPreset(presetAsk);
 
             }
 
@@ -681,12 +656,13 @@ namespace OmenMon.AppGui {
             this.CmbFanMode.DataSource = null;
             FanModes.Clear();
 
-            // Populate the fan mode list with clean user-facing OMEN presets (Eco, Quiet, Default, Performance, Custom)
-            List<string> cleanModes = new List<string> { "Eco", "Quiet", "Default", "Performance", "Custom" };
-            foreach(string name in cleanModes)
+            // Populate the fan mode list with the performance presets
+            foreach(PerformancePreset preset in PerformancePresets.All) {
+                string name = PerformancePresets.GetName(preset);
                 FanModes.Add(new {
                     Text = Config.Locale.Get(Config.L_GUI_MENU + Gui.M_ACT + Gui.G_FAN + "Mode" + name),
                     Value = name });
+            }
             this.CmbFanMode.DataSource = FanModes;
             this.CmbFanMode.DisplayMember = "Text";
             this.CmbFanMode.ValueMember = "Value";
@@ -868,7 +844,9 @@ namespace OmenMon.AppGui {
             // Hold if the Set button is already highlighted or the list is currently open
             if(!this.BtnFanSet.Checked && !this.CmbFanMode.DroppedDown)
             try {
-                this.CmbFanMode.SelectedValue = Enum.GetName(typeof(BiosData.FanMode), s.Mode);
+                PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset);
+                if(presetNow.HasValue)
+                    this.CmbFanMode.SelectedValue = PerformancePresets.GetName(presetNow.Value);
             } catch { }
 
             // Update the current fan program

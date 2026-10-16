@@ -554,7 +554,7 @@ namespace OmenMon.Library {
                             FanProgram[node.Attributes[XmlAttrFanProgramName].Value] =
                                 new FanProgramData(
                                     node.Attributes[XmlAttrFanProgramName].Value,
-                                    (BiosData.FanMode) Enum.Parse(typeof(BiosData.FanMode), node[XmlElementFanProgramMode].InnerText),
+                                    ParseFanModeOrThrow(node[XmlElementFanProgramMode].InnerText),
                                     (BiosData.GpuPowerLevel) Enum.Parse(typeof(BiosData.GpuPowerLevel), node[XmlElementFanProgramPower].InnerText),
                                     levels);
 
@@ -570,6 +570,14 @@ namespace OmenMon.Library {
 
             }
 
+        }
+
+        // Parses a program's BIOS fan mode, accepting defined values only
+        private static BiosData.FanMode ParseFanModeOrThrow(string name) {
+            BiosData.FanMode mode;
+            if(!BiosData.TryParseFanMode(name, out mode))
+                throw new ArgumentOutOfRangeException(nameof(name), name, "Not a BIOS fan mode");
+            return mode;
         }
 
         // Exports a single fan program to a standalone XML file
@@ -625,7 +633,7 @@ namespace OmenMon.Library {
                 var fanModeNode  = progNode.SelectSingleNode(XmlElementFanProgramMode);
                 var gpuPowerNode = progNode.SelectSingleNode(XmlElementFanProgramPower);
                 if(fanModeNode == null || gpuPowerNode == null) return null;
-                if(!Enum.TryParse(fanModeNode.InnerText, out OmenMon.Hardware.Bios.BiosData.FanMode fanMode)) return null;
+                if(!BiosData.TryParseFanMode(fanModeNode.InnerText, out BiosData.FanMode fanMode)) return null;
                 if(!Enum.TryParse(gpuPowerNode.InnerText, out OmenMon.Hardware.Bios.BiosData.GpuPowerLevel gpuPower)) return null;
                 var levels = new System.Collections.Generic.SortedDictionary<byte, byte[]>();
                 foreach(System.Xml.XmlElement levelNode in progNode.SelectNodes(XmlElementFanProgramLevel)) {

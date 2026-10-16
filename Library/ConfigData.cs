@@ -191,10 +191,10 @@ namespace OmenMon.Library {
         // Whether to use the Embedded Controller instead of a BIOS call to set the fan level
         public static bool FanLevelUseEc = false;
 
-        // Clean user-facing performance mode presets (ECO, Quiet, Default, Performance, Custom)
-        public static List<string> FanModesSticky = new List<string> { "Eco", "Quiet", "Default", "Performance", "Custom" };
-
-        // Custom Preset parameters (saved directly inside OmenMon.xml)
+        // Custom Preset parameters (saved directly inside OmenMon.xml). The other
+        // performance presets are defined in Hardware/PerformancePreset.cs.
+        // CustomPresetFanMode is a BIOS fan mode name (BiosData.FanMode, e.g. "Default",
+        // "Performance", "Quiet"); anything else falls back to Default.
         public static string CustomPresetFanMode = "Default";
         public static string CustomPresetGpuPower = "Medium";
         public static int CustomPresetMaxRpm = 0; // 0 = default/uncapped

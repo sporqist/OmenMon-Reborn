@@ -40,6 +40,33 @@ namespace OmenMon.AppGui {
         // the UI thread in GuiFormMain.UpdateFan, gated on RdoFanConst.Checked).
         internal volatile bool ConstantSpeedActive;
 
+        // Last performance preset applied. Presets can share a BIOS mode (Eco and Quiet
+        // both use thermal policy 3), so the reported mode alone cannot tell which one
+        // is active. Written under HardwareLock, read by the UI for display.
+        internal volatile object activePreset;
+        internal PerformancePreset? ActivePreset {
+            get { return this.activePreset as PerformancePreset?; }
+        }
+
+        // Applies a performance preset: hands back any OmenMon-held fan levels (as the
+        // Automatic path always did with 255/255), sets the preset's BIOS thermal policy
+        // and GPU power, the refresh rate for Eco, and its fixed levels (through the
+        // fan-safety guard). Callers hold HardwareLock.
+        internal void ApplyPreset(PerformancePreset preset) {
+            PresetSettings settings = PerformancePresets.Resolve(preset);
+            this.Platform.Fans.Release();
+            this.Platform.Fans.SetMode(settings.FanMode);
+            try {
+                if(settings.GpuPower.HasValue)
+                    this.Platform.System.SetGpuPower(new BiosData.GpuPowerData(settings.GpuPower.Value));
+                if(settings.RefreshRate.HasValue)
+                    Os.SetRefreshRate(settings.RefreshRate.Value);
+                if(settings.Levels != null)
+                    this.Platform.Fans.SetLevels(settings.Levels);
+            } catch { }
+            this.activePreset = preset;
+        }
+
         // Flag to indicate if running on full power.
         // Volatile: written by the monitor thread (PowerChange) / AutoConfig and read by the
         // UI thread (AC-flicker passive poll), so it needs a defined publish without a lock.
