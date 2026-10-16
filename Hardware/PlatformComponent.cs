@@ -226,13 +226,18 @@ namespace OmenMon.Hardware.Platform {
         // Stores the Embedded Controller register associated with the sensor
         protected byte Register;
 
+        // Register access (the live EC through Hw unless a test substitutes one)
+        protected IEcRegisters Registers;
+
         // Constructs an Embedded Controller readable component instance
         public EcComponent(
             byte register,
             PlatformData.AccessType access = PlatformData.AccessType.Read,
             PlatformData.DataSize size = PlatformData.DataSize.Byte,
-            int constraint = int.MaxValue) {
+            int constraint = int.MaxValue,
+            IEcRegisters registers = null) {
 
+            this.Registers = registers ?? HwEcRegisters.Instance;
             this.AccessType = access;
             this.Constraint = constraint;
             this.LinkType = PlatformData.LinkType.EmbeddedController;
@@ -268,20 +273,33 @@ namespace OmenMon.Hardware.Platform {
             }
         }
 
+        // Reads a value from the Embedded Controller, reporting whether the EC lock was
+        // obtained. On failure the value is 0, which is what Hw.EcGetByte/EcGetWord return
+        // on a lock timeout.
+        protected bool TryReadRegister(out int value) {
+            bool ok;
+            if(this.Size == PlatformData.DataSize.Byte) {
+                ok = this.Registers.TryReadByte(this.Register, out byte b);
+                value = b;
+            } else {
+                ok = this.Registers.TryReadWord(this.Register, out ushort w);
+                value = w;
+            }
+            return ok;
+        }
+
         // Reads a value from the Embedded Controller
         protected override int Read() {
-            if(this.Size == PlatformData.DataSize.Byte)
-                return Hw.EcGetByte(this.Register);
-            else
-                return Hw.EcGetWord(this.Register);
+            TryReadRegister(out int value);
+            return value;
         }
 
         // Writes a value to the Embedded Controller
         protected override void Write(int value) {
             if(this.Size == PlatformData.DataSize.Byte)
-                Hw.EcSetByte(this.Register, (byte) value);
+                this.Registers.TryWriteByte(this.Register, (byte) value);
             else
-                Hw.EcSetWord(this.Register, (ushort) value);
+                this.Registers.TryWriteWord(this.Register, (ushort) value);
         }
 
     }
@@ -289,9 +307,14 @@ namespace OmenMon.Hardware.Platform {
     // Implements a BIOS Temperature component
     public class WmiBiosTemperatureComponent : PlatformComponentAbstract, IPlatformReadComponent {
 
-        // Constructs an BIOS Temperature readable component instance
-        public WmiBiosTemperatureComponent(int constraint = int.MaxValue) {
+        // BIOS used for the reading (the shared Hw.Bios unless a test substitutes one)
+        private readonly OmenMon.Hardware.Bios.IBiosCtl bios;
 
+        // Constructs an BIOS Temperature readable component instance
+        public WmiBiosTemperatureComponent(int constraint = int.MaxValue,
+            OmenMon.Hardware.Bios.IBiosCtl bios = null) {
+
+            this.bios = bios;
             this.AccessType = PlatformData.AccessType.Read;
             this.Constraint = constraint;
             this.LinkType = PlatformData.LinkType.WmiBios;
@@ -311,7 +334,7 @@ namespace OmenMon.Hardware.Platform {
 
         // Reads a temperature value from the BIOS
         protected override int Read() {
-            return Hw.BiosGet(Hw.Bios.GetTemperature);
+            return Hw.BiosGet((this.bios ?? Hw.Bios).GetTemperature);
         }
 
     }

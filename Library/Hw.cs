@@ -311,6 +311,45 @@ namespace OmenMon.Library {
             return false;
         }
 
+        // Same as EcExec<TResult>(callback, ec) — the identical Request / callback / Release
+        // sequence — but tells the caller whether the callback ran at all. EcExec returns
+        // default(TResult) when the lock times out, which is indistinguishable from a
+        // genuine zero reading; sensor code needs the difference (a failed temperature
+        // read must never look like 0 °C). An absent EC counts as a failure, not a throw.
+        public static bool TryEcExec<TResult>(Func<IEmbeddedController,TResult> callback, IEmbeddedController ec, out TResult result) {
+            result = default(TResult);
+            if(ec == null)
+                return false;
+            if(ec.Request(Config.EcMutexTimeout)) {
+                try {
+                    result = callback(ec);
+                    return true;
+                } finally {
+                    ec.Release();
+                }
+            } else {
+                EcLockTimeout();
+                return false;
+            }
+        }
+
+        // Same as EcExec(callback, ec), reporting whether the callback ran
+        public static bool TryEcExec(Action<IEmbeddedController> callback, IEmbeddedController ec) {
+            if(ec == null)
+                return false;
+            if(ec.Request(Config.EcMutexTimeout)) {
+                try {
+                    callback(ec);
+                    return true;
+                } finally {
+                    ec.Release();
+                }
+            } else {
+                EcLockTimeout();
+                return false;
+            }
+        }
+
         // Prepares the Embedded Controller, runs operations while it is locked for exclusive use, and returns a result
         public static TResult EcExec<TResult>(Func<IEmbeddedController,TResult> callback) {
             using(Ec = EcInterface()) {
@@ -334,6 +373,25 @@ namespace OmenMon.Library {
             return Hw.EcExec<ushort>(ec => {
                 return ec.ReadWord(register);
             }, Hw.Ec);
+        }
+
+        // Variants of the four register accessors above that report whether the EC lock
+        // was obtained (false: lock timeout or no EC). The register access itself is the
+        // same ReadByte / ReadWord / WriteByte / WriteWord call on Hw.Ec.
+        public static bool TryEcGetByte(byte register, out byte value) {
+            return Hw.TryEcExec<byte>(ec => ec.ReadByte(register), Hw.Ec, out value);
+        }
+
+        public static bool TryEcGetWord(byte register, out ushort value) {
+            return Hw.TryEcExec<ushort>(ec => ec.ReadWord(register), Hw.Ec, out value);
+        }
+
+        public static bool TryEcSetByte(byte register, byte value) {
+            return Hw.TryEcExec(ec => ec.WriteByte(register, value), Hw.Ec);
+        }
+
+        public static bool TryEcSetWord(byte register, ushort value) {
+            return Hw.TryEcExec(ec => ec.WriteWord(register, value), Hw.Ec);
         }
 
         // Performs an Embedded Controller operation
