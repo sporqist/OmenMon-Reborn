@@ -333,12 +333,19 @@ namespace OmenMon.AppGui {
 
         private void MaintainEcoPlus() {
             try {
+                EcoPlus eco = this.Op?.EcoPlus;
+                if(eco == null)
+                    return;
                 PowerLineStatus line = SystemInformation.PowerStatus.PowerLineStatus;
-                if(line == this.EcoPlusLastLine && ++this.EcoPlusTicks < 60)
+                // Every tick while a refresh change waits for a stable power source
+                if(line == this.EcoPlusLastLine && !eco.RefreshPending && ++this.EcoPlusTicks < 60)
                     return;
                 this.EcoPlusLastLine = line;
                 this.EcoPlusTicks = 0;
-                this.Op?.EcoPlus?.Maintain(line == PowerLineStatus.Offline);
+                string done = eco.Maintain(line == PowerLineStatus.Offline);
+                if(done != null)
+                    EcoPlusLog.Append(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusLog.FileName),
+                        DateTime.Now, (line == PowerLineStatus.Offline ? "on battery: " : "plugged in: ") + done);
             } catch { }
         }
 

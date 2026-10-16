@@ -18,7 +18,10 @@ namespace OmenMon.Library {
     //    The original DC value is kept per scheme and written back when Eco+ is turned
     //    off. Measured on 8BAC (2026-10-16, WSL agents running): 59.5 W -> 39.2 W.
     //  * Optional refresh rate on battery, applied as a dynamic mode change (not saved as
-    //    the display's mode) and put back on AC or when Eco+ is turned off.
+    //    the display's mode) and put back on AC or when Eco+ is turned off. Each change
+    //    blanks the panel for about a second, so it waits until the power source has been
+    //    stable for RefreshHoldSeconds: on 8BAC a train socket dropping out for 5 s to
+    //    2 min, 18 times in a day, turned every drop into two black screens.
     //  * Per-app GPU preference "power saving" (HKCU DirectX UserGpuPreferences) for the
     //    apps that keep the discrete GPU awake. Explicit, not tied to battery: the apps
     //    read it when they start. The original values are kept and can be restored.
@@ -36,18 +39,28 @@ namespace OmenMon.Library {
         private readonly IDisplayRate display;
         private readonly EcoPlusState state;
         private readonly Func<EcoPlusOptions> options;
+        private readonly Func<DateTime> clock;
         private readonly object sync = new object();
 
+        // Power source as last seen, and since when (for the refresh-rate hold)
+        private bool? lineOnBattery;
+        private DateTime lineSince;
+
         public EcoPlus(IPowerPlan plan, IGpuPreferences gpu, IDisplayRate display,
-            EcoPlusState state, Func<EcoPlusOptions> options) {
+            EcoPlusState state, Func<EcoPlusOptions> options, Func<DateTime> clock = null) {
             this.plan = plan;
             this.gpu = gpu;
             this.display = display;
             this.state = state;
             this.options = options;
+            this.clock = clock ?? (() => DateTime.UtcNow);
         }
 
         public EcoPlusState State { get { return this.state; } }
+
+        // True while a refresh-rate change waits for the power source to be stable, so
+        // the caller keeps calling Maintain until it is decided
+        public bool RefreshPending { get; private set; }
 
         // Brings the settings in line with the options and the power source. Called on
         // start, on a power source change and periodically (the user may switch power
@@ -56,6 +69,14 @@ namespace OmenMon.Library {
             lock(this.sync) {
                 EcoPlusOptions o = this.options();
                 List<string> done = new List<string>();
+
+                DateTime now = this.clock();
+                if(this.lineOnBattery != onBattery) {
+                    this.lineOnBattery = onBattery;
+                    this.lineSince = now;
+                }
+                bool stable = (now - this.lineSince).TotalSeconds >= Math.Max(0, o.RefreshHoldSeconds);
+                RefreshPending = false;
 
                 if(!o.Enabled) {
                     string restored = RestoreSettingsLocked();
@@ -76,18 +97,26 @@ namespace OmenMon.Library {
                     }
                 }
 
-                // Refresh rate on battery
+                // Refresh rate on battery, once the power source has been stable
                 if(onBattery && o.RefreshRateOnBattery > 0) {
                     int current = this.display.Current();
-                    if(current > o.RefreshRateOnBattery && this.display.SetDynamic(o.RefreshRateOnBattery)) {
-                        if(!this.state.RefreshBefore.HasValue) {
-                            this.state.RefreshBefore = current;
-                            this.state.Save();
+                    if(current > o.RefreshRateOnBattery) {
+                        if(!stable)
+                            RefreshPending = true;
+                        else if(this.display.SetDynamic(o.RefreshRateOnBattery)) {
+                            if(!this.state.RefreshBefore.HasValue) {
+                                this.state.RefreshBefore = current;
+                                this.state.Save();
+                            }
+                            done.Add("refresh " + current + " -> " + o.RefreshRateOnBattery + " Hz");
                         }
-                        done.Add("refresh " + current + " -> " + o.RefreshRateOnBattery + " Hz");
                     }
                 } else if(this.state.RefreshBefore.HasValue) {
-                    // Plugged in, or the option was turned off: put the rate back
+                    // Plugged in (and stable), or the option was turned off: put the rate back
+                    if(o.RefreshRateOnBattery > 0 && !stable) {
+                        RefreshPending = true;
+                        return done.Count > 0 ? string.Join(", ", done) : null;
+                    }
                     int before = this.state.RefreshBefore.Value;
                     if(this.display.SetDynamic(before)) {
                         this.state.RefreshBefore = null;
@@ -165,12 +194,35 @@ namespace OmenMon.Library {
     public sealed class EcoPlusOptions {
         public bool Enabled;
         public int RefreshRateOnBattery;   // 0 = leave the refresh rate alone
+        public int RefreshHoldSeconds = 120;   // power source stable this long before a refresh change
 
         public static EcoPlusOptions FromConfig() {
             return new EcoPlusOptions {
                 Enabled = Config.EcoPlusEnabled,
-                RefreshRateOnBattery = Config.EcoPlusRefreshRate };
+                RefreshRateOnBattery = Config.EcoPlusRefreshRate,
+                RefreshHoldSeconds = Config.EcoPlusRefreshHold };
         }
+    }
+
+    // What Eco+ changed and when: one timestamped line per change in OmenMon-EcoPlus.log
+    // next to the state file. Cut to its newer half when it passes MaxBytes.
+    public static class EcoPlusLog {
+
+        public const string FileName = "OmenMon-EcoPlus.log";
+        public const int MaxBytes = 64 * 1024;
+
+        public static void Append(string path, DateTime time, string text) {
+            if(path == null || string.IsNullOrEmpty(text))
+                return;
+            try {
+                if(File.Exists(path) && new FileInfo(path).Length > MaxBytes) {
+                    string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                    File.WriteAllLines(path, lines.Skip(lines.Length / 2), new UTF8Encoding(false));
+                }
+                File.AppendAllText(path, time.ToString("yyyy-MM-dd HH:mm:ss") + "\t" + text + "\r\n", new UTF8Encoding(false));
+            } catch { }
+        }
+
     }
 
     // The original values Eco+ will restore. Text file, one value per line:

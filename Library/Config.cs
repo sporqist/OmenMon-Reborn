@@ -404,6 +404,9 @@ namespace OmenMon.Library {
                         && (number == 0 || number >= 24))
                         EcoPlusRefreshRate = number;
 
+                    if(GetWordInRange(xml, XmlPrefix + "EcoPlusRefreshHold", 0, 3600, out number))
+                        EcoPlusRefreshHold = number;
+
                     if(GetBool(xml, XmlPrefix + "GuiCloseWindowExit", out flag))
                         GuiCloseWindowExit = flag;
 
@@ -924,6 +927,7 @@ namespace OmenMon.Library {
             SetUInt(xml, XmlPrefix + "GpuPowerSetInterval", (uint) GpuPowerSetInterval);
             SetBool(xml, XmlPrefix + "EcoPlusEnabled", EcoPlusEnabled);
             SetUInt(xml, XmlPrefix + "EcoPlusRefreshRate", (uint) EcoPlusRefreshRate);
+            SetUInt(xml, XmlPrefix + "EcoPlusRefreshHold", (uint) EcoPlusRefreshHold);
             SetBool(xml, XmlPrefix + "GuiCloseWindowExit", GuiCloseWindowExit);
             SetBool(xml, XmlPrefix + "GuiDpiChangeResize", GuiDpiChangeResize);
             SetBool(xml, XmlPrefix + "GuiDynamicIcon", GuiDynamicIcon);

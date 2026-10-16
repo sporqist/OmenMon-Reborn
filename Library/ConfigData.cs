@@ -296,9 +296,12 @@ namespace OmenMon.Library {
         // not 0, that refresh rate on battery (restored on AC, never saved as the mode).
         // Every original value is kept in OmenMon-EcoPlus.state and restored when Eco+ is
         // turned off. Measured on 8BAC (2026-10-16): boost off on battery 59.5 -> 39.2 W;
-        // 165 -> 60 Hz no measurable change.
+        // 165 -> 60 Hz no measurable change. A refresh change blanks the panel for about a
+        // second, so it waits until the power source has been stable for
+        // EcoPlusRefreshHold seconds (a flaky socket must not black the screen out).
         public static bool EcoPlusEnabled = false;
         public static int EcoPlusRefreshRate = 0;
+        public static int EcoPlusRefreshHold = 120;
 
         // Whether closing the window closes the whole application
         public static bool GuiCloseWindowExit = false;

@@ -28,8 +28,9 @@ namespace OmenMon.Tests {
 
         private sealed class FakeDisplay : IDisplayRate {
             public int Hz = 165;
+            public int Sets;
             public int Current() { return this.Hz; }
-            public bool SetDynamic(int hz) { this.Hz = hz; return true; }
+            public bool SetDynamic(int hz) { if(hz != this.Hz) this.Sets++; this.Hz = hz; return true; }
         }
 
         private static readonly Guid Balanced = new Guid("381b4222-f694-41f0-9685-ff5bb260df2e");
@@ -39,7 +40,8 @@ namespace OmenMon.Tests {
         private readonly FakePlan plan = new FakePlan();
         private readonly FakeGpu gpu = new FakeGpu();
         private readonly FakeDisplay display = new FakeDisplay();
-        private EcoPlusOptions options = new EcoPlusOptions { Enabled = true };
+        private EcoPlusOptions options = new EcoPlusOptions { Enabled = true, RefreshHoldSeconds = 0 };
+        private DateTime now = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
 
         public EcoPlusTests() {
             Directory.CreateDirectory(this.dir);
@@ -52,7 +54,7 @@ namespace OmenMon.Tests {
         private string StatePath { get { return Path.Combine(this.dir, EcoPlusState.FileName); } }
 
         private EcoPlus NewEco() {
-            return new EcoPlus(this.plan, this.gpu, this.display, EcoPlusState.Load(StatePath), () => this.options);
+            return new EcoPlus(this.plan, this.gpu, this.display, EcoPlusState.Load(StatePath), () => this.options, () => this.now);
         }
 
         [Fact]
@@ -111,7 +113,7 @@ namespace OmenMon.Tests {
 
         [Fact]
         public void Refresh_LowOnBattery_BackOnAc() {
-            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60 };
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
             var eco = NewEco();
             eco.Maintain(true);
             Assert.Equal(60, this.display.Hz);
@@ -130,12 +132,107 @@ namespace OmenMon.Tests {
 
         [Fact]
         public void Refresh_OptionTurnedOffOnBattery_PutsTheRateBack() {
-            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60 };
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
             var eco = NewEco();
             eco.Maintain(true);
-            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 0 };
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 0, RefreshHoldSeconds = 0 };
             eco.Maintain(true);
             Assert.Equal(165, this.display.Hz);
+        }
+
+        // A flaky socket (seen on a train: drops of 5 s to 2 min, 18 a day): each refresh
+        // change blanks the panel, so nothing changes until the power source is stable
+        private EcoPlus HeldEco() {
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 120 };
+            var eco = NewEco();
+            eco.Maintain(false);                // plugged in for a long time
+            this.now = this.now.AddHours(1);
+            return eco;
+        }
+
+        private void Tick(EcoPlus eco, bool onBattery, int seconds) {
+            for(int i = 0; i < seconds; i++) {
+                eco.Maintain(onBattery);
+                this.now = this.now.AddSeconds(1);
+            }
+        }
+
+        [Fact]
+        public void Refresh_ShortDrops_NeverChangeTheRate() {
+            var eco = HeldEco();
+            for(int drop = 0; drop < 18; drop++) {
+                Tick(eco, true, 5 + drop * 6);     // 5 .. 107 s on battery
+                Tick(eco, false, 30);
+            }
+            Assert.Equal(0, this.display.Sets);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_StableOnBattery_LowersAfterTheHold() {
+            var eco = HeldEco();
+            Tick(eco, true, 120);                // t = 0 .. 119 s
+            Assert.Equal(165, this.display.Hz);
+            Assert.True(eco.RefreshPending);
+            eco.Maintain(true);                  // t = 120 s
+            Assert.Equal(60, this.display.Hz);
+            Assert.False(eco.RefreshPending);
+            Assert.Equal(1, this.display.Sets);
+        }
+
+        [Fact]
+        public void Refresh_BackOnAc_RestoresOnlyWhenStable() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            Tick(eco, false, 10);                // power comes back briefly
+            Tick(eco, true, 30);                 // and drops again
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(1, this.display.Sets);
+            Tick(eco, false, 120);
+            Assert.True(eco.RefreshPending);
+            eco.Maintain(false);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+            Assert.Equal(2, this.display.Sets);
+        }
+
+        [Fact]
+        public void Refresh_TurningOff_RestoresAtOnce_EvenWhileUnstable() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            Tick(eco, false, 3);
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 0, RefreshHoldSeconds = 120 };
+            eco.Maintain(false);
+            Assert.Equal(165, this.display.Hz);
+
+            Tick(eco, true, 121);
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 120 };
+            Tick(eco, true, 1);                  // on battery for long: lowers at once
+            Assert.Equal(60, this.display.Hz);
+            Tick(eco, false, 3);
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(false);
+            Assert.Equal(165, this.display.Hz);
+        }
+
+        [Fact]
+        public void Boost_IsNotHeld() {
+            var eco = HeldEco();
+            eco.Maintain(true);
+            Assert.Equal(0u, this.plan.Dc[Balanced]);
+        }
+
+        [Fact]
+        public void Log_AppendsAndStaysSmall() {
+            string log = Path.Combine(this.dir, EcoPlusLog.FileName);
+            for(int i = 0; i < 3000; i++)
+                EcoPlusLog.Append(log, this.now, "on battery: refresh 165 -> 60 Hz #" + i);
+            Assert.True(new FileInfo(log).Length <= EcoPlusLog.MaxBytes + 200);
+            string[] lines = File.ReadAllLines(log);
+            Assert.EndsWith("#2999", lines[lines.Length - 1]);
+            Assert.StartsWith("2026-10-16 12:00:00	", lines[0]);
         }
 
         [Fact]

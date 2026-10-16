@@ -152,6 +152,12 @@ namespace OmenMon.AppGui {
             try { Config.Save(); } catch { }
             string what = null;
             try { what = this.Eco?.Maintain(SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Offline); } catch(Exception ex) { what = "failed: " + ex.Message; }
+            if(what != null)
+                EcoPlusLog.Append(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusLog.FileName),
+                    DateTime.Now, "Power window: " + what);
+            if(what == null && this.Eco != null && this.Eco.RefreshPending)
+                what = "On. The refresh rate changes once the power source has been stable for "
+                    + Config.EcoPlusRefreshHold + " s.";
             LblEco.Text = what ?? (ChkEco.Checked ? "On." : "Off.");
             UpdateRestoreButton();
         }
