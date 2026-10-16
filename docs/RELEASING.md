@@ -1,8 +1,8 @@
 # OmenMon-Reborn — Release Runbook
 
 A concrete, copy-paste-able checklist for cutting a release. Written for
-the maintainer (seakyy), assumes a Windows machine with Git Bash + Visual
-Studio 2022 installed in the usual places.
+the maintainer (seakyy), assumes a Windows machine with Git Bash + the
+.NET 10 SDK installed in the usual places.
 
 The first time you read this, do the whole flow on a *throwaway pre-release
 tag* (e.g. `v1.4.0-rc1`) so any rough edges in the automation show up before
@@ -19,12 +19,10 @@ they bite a real release.
 #    Edit: CHANGELOG.md    (move "Unreleased" to a new "## [X.Y.Z-reborn] - YYYY-MM-DD" block)
 
 # 2. Build locally (Release config)
-"/c/Program Files/Microsoft Visual Studio/2022/Enterprise/MSBuild/Current/Bin/MSBuild.exe" \
-  -m -noLogo -restore -p:Configuration=Release -t:Rebuild OmenMon.sln
+dotnet build OmenMon.sln -c Release --no-incremental
 
 # 3. Run the tests
-"/c/Program Files/dotnet/dotnet" test Tests/OmenMon.Tests/OmenMon.Tests.csproj \
-  -c Release --nologo --no-build
+dotnet test --project Tests/OmenMon.Tests/OmenMon.Tests.csproj -c Release --no-build
 
 # 4. Compute SHA256 of the shipped binary (paste into release notes)
 "/c/Program Files/Git/usr/bin/sha256sum.exe" Bin/OmenMon.exe
@@ -50,11 +48,9 @@ That's the whole flow. The rest of this doc is the **why** and the **what if**.
 
 You need these installed once:
 
-- **Visual Studio 2022** (Enterprise / Professional / Community — any edition).
-  Confirm MSBuild lives at:
-  `C:\Program Files\Microsoft Visual Studio\2022\<edition>\MSBuild\Current\Bin\MSBuild.exe`
-- **.NET 10 SDK** for `dotnet test` (`global.json` asks for 10.0.100 or a later 10.0 feature band).
-  Confirm with `dotnet --version` → should print `10.0.x`.
+- **.NET 10 SDK** for `dotnet build` and `dotnet test` (`global.json` asks for 10.0.100 or a later 10.0 feature band).
+  Confirm with `dotnet --version` → should print `10.0.x`. Neither Visual Studio nor the
+  .NET Framework 4.8 targeting pack is needed: the net48 reference assemblies come from NuGet.
 - **Git Bash** (or any sh-compatible shell) for the snippets above.
   Comes with Git for Windows.
 - **PawnIO** installed from <https://pawnio.eu/> for runtime testing.
@@ -137,8 +133,7 @@ extractor, but `v1.5.0` (with the `v` prefix) is not.
 ## Step 2 — Build locally
 
 ```bash
-"/c/Program Files/Microsoft Visual Studio/2022/Enterprise/MSBuild/Current/Bin/MSBuild.exe" \
-  -m -noLogo -restore -p:Configuration=Release -t:Rebuild OmenMon.sln
+dotnet build OmenMon.sln -c Release --no-incremental
 ```
 
 Two things to check in the output:
@@ -147,7 +142,8 @@ Two things to check in the output:
   with warnings; future-you won't be able to tell new warnings from old ones.
 - The line `OmenMon -> ...\Bin\OmenMon.exe` actually appears. Confirms the
   embedded resource picked up `Resources/LpcACPIEC.bin` and the binary made
-  it to `Bin/`.
+  it to `Bin/`. That is the .NET Framework 4.8 build that ships; the
+  project also builds a .NET 10 version into `Bin/net10.0-windows/`.
 
 If you see `error MSB3030` about a missing `Resources/LpcACPIEC.bin`, that's
 not a bug in the build — it's the Release-time safety check refusing to
@@ -160,8 +156,7 @@ drop it into `Resources/`, and rebuild.
 ## Step 3 — Run the tests
 
 ```bash
-"/c/Program Files/dotnet/dotnet" test Tests/OmenMon.Tests/OmenMon.Tests.csproj \
-  -c Release --nologo --no-build
+dotnet test --project Tests/OmenMon.Tests/OmenMon.Tests.csproj -c Release --no-build
 ```
 
 Expected output: **`Passed!  - Failed: 0, Passed: 17, Skipped: 0`** (or
@@ -172,9 +167,9 @@ unfamiliar hardware depend on; a broken entry causes nonsense readouts that
 look like a crash to a non-technical user. Fix the offending `<Model>`
 entry in `OmenMon.xml` first.
 
-The test project is .NET 10 SDK-style (xUnit v3 on Microsoft.Testing.Platform); the main project is .NET Framework 4.8.
-That mismatch is intentional and supported — `dotnet test` builds and runs
-the test project independently, the .exe you ship is untouched.
+The test project is .NET 10 SDK-style (xUnit v3 on Microsoft.Testing.Platform). The main project
+targets both .NET Framework 4.8 (the shipped `Bin/OmenMon.exe`) and .NET 10; the tests reference
+and run against its .NET 10 build, so the .exe you ship is untouched.
 
 ---
 
@@ -346,8 +341,7 @@ cp /path/to/extracted/LpcACPIEC.bin Resources/LpcACPIEC.bin
 ls -la Resources/LpcACPIEC.bin            # expect roughly 2-3 KB
 
 # 4. Rebuild and run OmenMon locally
-"/c/Program Files/Microsoft Visual Studio/2022/Enterprise/MSBuild/Current/Bin/MSBuild.exe" \
-  -m -noLogo -restore -p:Configuration=Release -t:Rebuild OmenMon.csproj
+dotnet build OmenMon.csproj -c Release --no-incremental
 
 # 5. Verify the new build loads it
 ./Bin/OmenMon.exe -Diag    # check the "Kernel Driver (PawnIO)" section shows IsOpen: True

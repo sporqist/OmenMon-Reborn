@@ -23,7 +23,7 @@ rem Version is not pinned here: OmenMon.csproj defaults AssemblyVersion /
 rem AssemblyVersionWord (and CI's build_bump.yml overrides them for tagged
 rem releases), so a local `make build` always picks up the current version
 rem without this file needing a bump every release.
-set msbuild_flags=/p:Configuration=Release
+set msbuild_flags=/restore /p:Configuration=Release
 set nuget=%~dps0nuget.exe
 set nuget_url=https://dist.nuget.org/win-x86-commandline/latest/nuget.exe
 set op_scope=build clean kill prepare test usage
@@ -42,7 +42,7 @@ goto end
 
 :clean
 call :TaskKill %result_bin%
-%msbuild% /t:Clean
+%msbuild% /restore /t:Clean
 rem Handled within .csproj now:
 rem call :RecursivelyRemoveDir Bin
 rem call :RecursivelyRemoveDir Obj
