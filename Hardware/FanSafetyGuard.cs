@@ -32,7 +32,7 @@ namespace OmenMon.Hardware.Platform {
 
         // After handing control back to the BIOS, how long the 0x10 heartbeat must stay
         // quiet for the last level to expire (8BAC: ~124 s after the last 0x2E/0x10)
-        public TimeSpan HandBackQuietPeriod = TimeSpan.FromSeconds(130);
+        public TimeSpan HandBackQuietPeriod = TimeSpan.FromSeconds(150);
 
         public byte Floor(int fan) {
             return fan == 0 ? this.FloorCpu : this.FloorGpu;
