@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - **HP OMEN 16-wf0xxx (`8BAC`):** `KnownBoards` mapping; both fans read the measured speed from the BIOS fan level (×100). EC 0x11 is the CPU fan target, and the GPU fan has no EC register.
+### Fixed
+
+- **GPU power presets no longer write a peak temperature of 0.** `SetGpuPower` keeps the current threshold, or falls back to 87 °C (0x57), when a preset leaves it at 0.
 
 ## [1.5.0-reborn] - 2026-09-19
 
