@@ -7,6 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Do not copy the application's OmenMon.xml (configuration, not XML documentation)
+         next to the tests: GuardLedgerTests locate the repository root by that file -->
+    <AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,16 +20,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <!-- EcDiffScanner is deliberately a pure, dependency-free static class so the
-       RPM-encoding heuristics can be compiled directly into this .NET 10 test
-       project (the main project is .NET Framework 4.8 and cannot be referenced).
-       If this include breaks, someone added an App/Hardware dependency to the
-       scanner - keep it pure instead. -->
+  <!-- Tests run against the net10.0-windows build of the application itself -->
   <ItemGroup>
-    <Compile Include="..\..\Hardware\BiosData.cs" Link="Hardware\BiosData.cs" />
-    <Compile Include="..\..\Hardware\EcDiffScanner.cs" Link="Hardware\EcDiffScanner.cs" />
-    <Compile Include="..\..\Library\Conv.cs" Link="Library\Conv.cs" />
-    <Compile Include="..\..\Library\FanDataPipeServer.cs" Link="Library\FanDataPipeServer.cs" />
+    <ProjectReference Include="..\..\OmenMon.csproj" />
   </ItemGroup>
 
 </Project>
