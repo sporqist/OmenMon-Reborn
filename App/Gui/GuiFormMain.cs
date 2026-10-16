@@ -862,9 +862,15 @@ namespace OmenMon.AppGui {
             // Hold if the Set button is already highlighted or the list is currently open
             if(!this.BtnFanSet.Checked && !this.CmbFanMode.DroppedDown)
             try {
+                // A BIOS mode no preset uses (8BAC boots in 0x01 and also reports 0x11)
+                // shows no preset: leaving the selection alone left the list on its first
+                // entry, "ECO (Quiet & 60Hz)", which was then shown as if it were active
+                // (2026-10-16, on hardware)
                 PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset);
                 if(presetNow.HasValue)
                     this.CmbFanMode.SelectedValue = PerformancePresets.GetName(presetNow.Value);
+                else
+                    this.CmbFanMode.SelectedIndex = -1;
             } catch { }
 
             // Update the current fan program
