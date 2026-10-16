@@ -33,11 +33,11 @@ namespace OmenMon.Tests {
                 server.Publish(4500, 4200);
 
                 using (var client = new NamedPipeClientStream(".", testPipeName, PipeDirection.In)) {
-                    await client.ConnectAsync(3000);
+                    await client.ConnectAsync(3000, TestContext.Current.CancellationToken);
                     Assert.True(client.IsConnected);
 
                     byte[] buffer = new byte[256];
-                    int bytesRead = await client.ReadAsync(buffer, 0, buffer.Length);
+                    int bytesRead = await client.ReadAsync(buffer, 0, buffer.Length, TestContext.Current.CancellationToken);
                     string received = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
                     Assert.Contains("\"cpu\":4500", received);

@@ -53,8 +53,8 @@ You need these installed once:
 - **Visual Studio 2022** (Enterprise / Professional / Community — any edition).
   Confirm MSBuild lives at:
   `C:\Program Files\Microsoft Visual Studio\2022\<edition>\MSBuild\Current\Bin\MSBuild.exe`
-- **.NET 8 SDK** for `dotnet test`.
-  Confirm with `dotnet --version` → should print `8.0.x`.
+- **.NET 10 SDK** for `dotnet test` (`global.json` asks for 10.0.100 or a later 10.0 feature band).
+  Confirm with `dotnet --version` → should print `10.0.x`.
 - **Git Bash** (or any sh-compatible shell) for the snippets above.
   Comes with Git for Windows.
 - **PawnIO** installed from <https://pawnio.eu/> for runtime testing.
@@ -172,7 +172,7 @@ unfamiliar hardware depend on; a broken entry causes nonsense readouts that
 look like a crash to a non-technical user. Fix the offending `<Model>`
 entry in `OmenMon.xml` first.
 
-The test project is .NET 8 SDK-style; the main project is .NET Framework 4.8.
+The test project is .NET 10 SDK-style (xUnit v3 on Microsoft.Testing.Platform); the main project is .NET Framework 4.8.
 That mismatch is intentional and supported — `dotnet test` builds and runs
 the test project independently, the .exe you ship is untouched.
 

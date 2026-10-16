@@ -28,44 +28,44 @@ permissions:
 jobs:
   stage1-unit-tests:
     name: "Stage 1: Unit Tests"
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
 
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: "Set up .NET 8 SDK"
-        uses: actions/setup-dotnet@v4
+      - name: "Set up .NET 10 SDK"
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - name: "Run Unit Tests"
         run: |
-          dotnet test Tests/OmenMon.Tests/OmenMon.Tests.csproj -c Release --nologo
+          dotnet test --project Tests/OmenMon.Tests/OmenMon.Tests.csproj -c Release
 
   stage2-compile:
     name: "Stage 2: Compile Executable"
     needs: stage1-unit-tests
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
 
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: "Set up .NET 8 SDK"
-        uses: actions/setup-dotnet@v4
+      - name: "Set up .NET 10 SDK"
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - name: "Set up MSBuild"
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
       - name: "Build Solution with Root OmenMon.xml"
         run: |
           msbuild -m -noLogo /restore -p:Configuration=Release -t:Rebuild OmenMon.sln
 
       - name: "Upload CI Artifacts"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: OmenMon-CI-Binaries
           path: |

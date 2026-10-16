@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.Linq;
 using OmenMon.Hardware.Ec;
 
-// This file is link-compiled into the .NET 8 test project, whose nullable
+// This file is link-compiled into the .NET 10 test project, whose nullable
 // context would otherwise flood the build with annotation warnings.
 #nullable disable
 
