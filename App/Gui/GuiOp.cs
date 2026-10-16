@@ -68,6 +68,19 @@ namespace OmenMon.AppGui {
             // Initialize the fan program
             this.Program = new FanProgram(this.Platform, FanProgramCallback);
 
+            // Last-chance hand-back of fan control to the BIOS on process exit or a fatal
+            // crash (App.OnExit, Crash). Takes the hardware lock if it can get it within
+            // 2 s; a crashed thread may still hold it, and handing back matters more.
+            FanHandBack.Register(() => {
+                bool locked = Monitor.TryEnter(this.HardwareLock, 2000);
+                try {
+                    this.Platform.Fans.ReleaseIfHeld();
+                } finally {
+                    if(locked)
+                        Monitor.Exit(this.HardwareLock);
+                }
+            });
+
             // Set the full power flag using the multi-source check so a boot that
             // happens to land mid-flicker (issue #70) does not load the alternate
             // fan program by mistake.
@@ -418,18 +431,31 @@ namespace OmenMon.AppGui {
         // Responds to the system entering and resuming from low-power state events
         public uint SuspendResumeCallback(IntPtr context, uint type, IntPtr setting) {
 
-            // System is resuming from suspend
-            if(type == PowrProf.PBT_APMRESUMEAUTOMATIC)
+            // Serialised with the monitor thread like every other control sequence
+            lock(this.HardwareLock) {
 
-                // Resume the fan program
-                this.Program.Resume();
+                // System is resuming from suspend
+                if(type == PowrProf.PBT_APMRESUMEAUTOMATIC) {
 
-            // System is about to be suspended
-            // and a fan program is running
-            else if(type == PowrProf.PBT_APMSUSPEND)
+                    // Resume the fan program, if configured to suspend it
+                    if(Config.FanProgramSuspend)
+                        this.Program.Resume();
 
-                // Suspend the fan program
-                this.Program.Suspend();
+                // System is about to be suspended
+                } else if(type == PowrProf.PBT_APMSUSPEND) {
+
+                    // Suspend the fan program (which hands fan control back to the BIOS),
+                    // if configured to; otherwise, if no program runs, hand back any level
+                    // OmenMon holds (constant speed, Fan Off) so it does not outlive the
+                    // session in an unknown thermal state. It is not restored on resume.
+                    if(Config.FanProgramSuspend && this.Program.IsEnabled)
+                        this.Program.Suspend();
+                    else if(!this.Program.IsEnabled)
+                        this.Platform.Fans.ReleaseIfHeld();
+
+                }
+
+            }
 
             return 0;
 

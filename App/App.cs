@@ -183,6 +183,10 @@ namespace OmenMon {
         // Handler that gets called when the application is about to exit
         private static void OnExit(object sender, EventArgs e) {
 
+                // Hand fan control back to the BIOS if a level is still held (normally
+                // done already when the GUI exits; this covers other exit paths)
+                OmenMon.Hardware.Platform.FanHandBack.Run(1500);
+
                 // Close the hardware, if opened
                 if(Hw.IsInitialized)
                     Hw.Close();

@@ -155,10 +155,10 @@ namespace OmenMon.AppGui {
             this.Filter = new GuiFilter(Context);
             Application.AddMessageFilter(this.Filter);
 
-            // Receive suspend and resume event notifications
-            // only if configured to suspend and resume fan program
-            if(Config.FanProgramSuspend)
-                Gui.RegisterSuspendResumeNotification(this.Op.SuspendResumeCallback);
+            // Receive suspend and resume event notifications: the fan program is
+            // suspended and resumed if so configured, and fan levels held outside a
+            // program are handed back to the BIOS on suspend regardless
+            Gui.RegisterSuspendResumeNotification(this.Op.SuspendResumeCallback);
 
             // Set up the timer
             this.Timer = new System.Windows.Forms.Timer(Components);
@@ -240,9 +240,15 @@ namespace OmenMon.AppGui {
             // Stop receiving power event notifications
             Gui.UnregisterSuspendResumeNotification();
 
-            // Terminate the fan program, if any
-            if(this.Op.Program.IsEnabled)
-                this.Op.Program.Terminate();
+            // Terminate the fan program, if any (hands fan control back to the BIOS),
+            // or hand back any level held outside a program (constant speed, Fan Off,
+            // presets, thermal panic)
+            lock(this.Op.HardwareLock) {
+                if(this.Op.Program.IsEnabled)
+                    this.Op.Program.Terminate();
+                else
+                    this.Op.Platform.Fans.ReleaseIfHeld();
+            }
 
             // Perform the usual tasks
             base.ExitThreadCore();

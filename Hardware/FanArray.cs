@@ -22,8 +22,31 @@ namespace OmenMon.Hardware.Platform {
 
         // Retrieves or sets the levels
         // of all fans at the same time
+        // (writes go through the fan-safety guard, see FanSafetyGuard)
         public byte[] GetLevels();
         public void SetLevels(byte[] levels);
+        public void SetLevels(byte[] levels, FanLevelSource source);
+
+        // Fan-safety guard every level write goes through (null: none, legacy)
+        public FanSafetyGuard Guard { get; set; }
+
+        // Hands fan control back to the BIOS: a safe last level if OmenMon holds one,
+        // then 255/255. ReleaseIfHeld() does nothing if OmenMon holds no level.
+        public void Release();
+        public void ReleaseIfHeld();
+
+        // Writes whatever the guard says is needed now (raise a level that is no
+        // longer allowed, refresh the panic level); true if something was written
+        public bool Supervise();
+
+        // Enters or leaves level-based thermal panic (fan-table maximum)
+        public void SetPanic(bool flag);
+
+        // Whether the 0x10 heartbeat may run (false shortly after a hand-back)
+        public bool HeartbeatAllowed { get; }
+
+        // Whether Supervise() needs to run on every pass
+        public bool NeedsSupervision { get; }
 
         // Retrieves or sets maximum fan speed
         public bool GetMax();  
@@ -76,6 +99,15 @@ namespace OmenMon.Hardware.Platform {
         // BIOS used for fan calls (the shared Hw.Bios unless a test substitutes one)
         private readonly IBiosCtl bios;
         protected IBiosCtl Bios { get { return this.bios ?? Hw.Bios; } }
+
+        // Fan-safety guard (set by Platform)
+        public FanSafetyGuard Guard { get; set; }
+
+        // Panic level cache (fan-table maximum, read once)
+        private byte[] panicLevel;
+
+        // When the 0x2E fan-level call was last armed with a 0x10 query by this class
+        private DateTime lastArmAt;
 
         // Constructs a fan array instance
         public FanArray(
@@ -132,8 +164,139 @@ namespace OmenMon.Hardware.Platform {
             return Hw.BiosGet(this.Bios.GetFanLevel);
         }
 
-        // Sets the levels of all fans at the same time
+        // Sets the levels of all fans at the same time (a manual request)
         public void SetLevels(byte[] levels) {
+            SetLevels(levels, FanLevelSource.Manual);
+        }
+
+        // Sets the levels of all fans at the same time, subject to the fan-safety guard.
+        // 255/255 is the legacy "release" request and is handled as a hand-back.
+        public void SetLevels(byte[] levels, FanLevelSource source) {
+
+            if(levels[0] == FanSafetyGuard.NoChange && levels[1] == FanSafetyGuard.NoChange) {
+                Release();
+                return;
+            }
+
+            byte[] actual = this.Guard != null ? this.Guard.Filter(levels, source) : levels;
+            WriteLevels(actual);
+            this.Guard?.RecordWrite(levels, actual, source);
+
+        }
+
+        // Hands fan control back to the BIOS (see FanSafetyGuard.HandBackLevel for why
+        // a last level is written first)
+        public void Release() {
+
+            if(this.Guard != null && this.Guard.HoldsLevel) {
+                ArmFanLevel(true);
+                WriteLevels(this.Guard.HandBackLevel());
+            }
+
+            WriteLevels(new byte[] { FanSafetyGuard.NoChange, FanSafetyGuard.NoChange });
+            this.Guard?.RecordRelease();
+
+        }
+
+        // Hands fan control back only if OmenMon holds a level (exit, crash, suspend)
+        public void ReleaseIfHeld() {
+            if(this.Guard != null && this.Guard.HoldsLevel)
+                Release();
+        }
+
+        // Writes what the guard requires now
+        public bool Supervise() {
+
+            if(this.Guard == null)
+                return false;
+
+            byte[] level = this.Guard.Supervise();
+            if(level == null)
+                return false;
+
+            ArmFanLevel(false);
+            if(Config.FanLevelUseEc && this.GetOff())
+                this.Switch.SetValue((int) PlatformData.FanSwitch.On);
+            WriteLevels(level);
+            this.Guard.RecordSupervisedWrite(level);
+            return true;
+
+        }
+
+        // Enters or leaves level-based thermal panic. Entering writes the panic level at
+        // once; leaving re-applies the last requested level, or hands control back to the
+        // BIOS if nothing was requested (panic started from automatic mode).
+        public void SetPanic(bool flag) {
+
+            if(this.Guard == null)
+                return;
+
+            if(flag) {
+                if(!this.Guard.IsPanic) {
+                    this.Guard.SetPanic(GetPanicLevel());
+                    Supervise();
+                }
+                return;
+            }
+
+            if(!this.Guard.IsPanic)
+                return;
+            this.Guard.SetPanic(null);
+            byte[] requested = this.Guard.Requested;
+            if(requested != null)
+                SetLevels(requested, this.Guard.RequestedSource);
+            else
+                Release();
+
+        }
+
+        public bool HeartbeatAllowed {
+            get { return this.Guard == null || this.Guard.HeartbeatAllowed; }
+        }
+
+        public bool NeedsSupervision {
+            get { return this.Guard != null && this.Guard.NeedsSupervision; }
+        }
+
+        // The thermal-panic level: the highest level per fan in the BIOS fan table
+        // (0x2F), but at least Config.FanLevelMax; Config.FanLevelMax if the table
+        // cannot be read or makes no sense. Read once.
+        public byte[] GetPanicLevel() {
+            if(this.panicLevel != null)
+                return this.panicLevel;
+            byte max = (byte) Math.Max(1, Math.Min(100, Config.FanLevelMax));
+            byte[] level = new byte[] { max, max };
+            try {
+                BiosData.FanTable table = this.Bios.GetFanTable();
+                if(table.Level != null)
+                    foreach(BiosData.FanLevel row in table.Level) {
+                        if(row.Fan1Level <= 100 && row.Fan1Level > level[0]) level[0] = row.Fan1Level;
+                        if(row.Fan2Level <= 100 && row.Fan2Level > level[1]) level[1] = row.Fan2Level;
+                    }
+            } catch { }
+            this.panicLevel = level;
+            return level;
+        }
+
+        // On boards like 8BAC a 0x2E fan-level call only takes effect within ~30 s after
+        // a 0x10 fan-count query (normally the BIOS heartbeat). Safety-relevant writes
+        // (hand-back, panic, raising a level the guard no longer allows) issue that query
+        // themselves, at most every 20 s unless forced, so they work even while the
+        // heartbeat is paused (battery) or quiet (after a hand-back).
+        private void ArmFanLevel(bool force) {
+            if(Config.FanLevelUseEc)
+                return;
+            DateTime now = this.Guard != null ? this.Guard.Now : DateTime.UtcNow;
+            if(!force && now - this.lastArmAt < TimeSpan.FromSeconds(20))
+                return;
+            try {
+                this.Bios.GetFanCount();
+                this.lastArmAt = now;
+            } catch { }
+        }
+
+        // Writes fan levels without any checks
+        private void WriteLevels(byte[] levels) {
 
             // Set manual fan mode, if needed
             if(Config.FanLevelNeedManual)
@@ -205,8 +368,22 @@ namespace OmenMon.Hardware.Platform {
             return ((PlatformData.FanSwitch) this.Switch.GetValue()) == PlatformData.FanSwitch.Off;
         }
 
-        // Switches the fan off or back on
+        // Switches the fan off or back on. Switching off is a request for 0/0 and goes
+        // through the fan-safety guard: while the system is not known to be cool (or once
+        // the Fan Off time limit is up) the fans get the floor level instead.
         public void SetOff(bool flag) {
+            if(flag && this.Guard != null) {
+                byte[] off = new byte[] { 0, 0 };
+                byte[] actual = this.Guard.Filter(off);
+                if(actual[0] != 0 || actual[1] != 0) {
+                    if(Config.FanLevelUseEc && this.GetOff())
+                        this.Switch.SetValue((int) PlatformData.FanSwitch.On);
+                    WriteLevels(actual);
+                    this.Guard.RecordWrite(off, actual);
+                    return;
+                }
+                this.Guard.RecordWrite(off, actual);
+            }
             if(flag && !Config.FanLevelUseEc) {
                 try {
 

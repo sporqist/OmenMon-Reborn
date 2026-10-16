@@ -424,8 +424,19 @@ namespace OmenMon.AppCli {
             byte fanLevel = (byte) level;
             try { fans.SetLevels(new byte[] { fanLevel, fanLevel }); } catch { }
             // Also drive the rate registers so we cover both 2022 and 2023+ layouts.
-            try { fans.Fan[0].SetRate((byte) percent); } catch { }
-            try { fans.Fan[1].SetRate((byte) percent); } catch { }
+            // The level write above went through the fan-safety guard, which raises a
+            // step below the floor (the 0 % step) unless the system is cool; the rate
+            // written here is raised to match, so the rate register cannot stop the
+            // fans where the level register may not.
+            byte[] allowed = fans.Guard != null
+                ? fans.Guard.Filter(new byte[] { fanLevel, fanLevel })
+                : new byte[] { fanLevel, fanLevel };
+            for(int i = 0; i < 2; i++) {
+                int rate = clamped;
+                if(allowed[i] > fanLevel && Config.FanLevelMax > 0)
+                    rate = Math.Max(rate, Math.Min(100, (allowed[i] * 100 + Config.FanLevelMax - 1) / Config.FanLevelMax));
+                try { fans.Fan[i].SetRate((byte) rate); } catch { }
+            }
         }
 
         private static byte[] SnapshotEc() {

@@ -63,6 +63,10 @@ namespace OmenMon {
 
         private static void OnAppDomainException(object sender, UnhandledExceptionEventArgs e) {
             try { Write(e.ExceptionObject as Exception, isTerminating: e.IsTerminating, source: "AppDomain"); } catch { }
+            // The process is going down: hand fan control back to the BIOS so a level
+            // OmenMon set (or the fans being off) does not outlive it. Bounded wait.
+            if(e.IsTerminating)
+                try { OmenMon.Hardware.Platform.FanHandBack.Run(1500); } catch { }
         }
 
         private static void OnThreadException(object sender, ThreadExceptionEventArgs e) {

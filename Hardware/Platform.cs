@@ -77,6 +77,9 @@ namespace OmenMon.Hardware.Platform {
             // Initialize the temperature controls
             InitTemperature();
 
+            // Initialize the fan-safety guard (needs both of the above)
+            InitFanSafety();
+
         }
 
         // Constructs a platform from ready-made parts, bypassing hardware discovery
@@ -96,6 +99,8 @@ namespace OmenMon.Hardware.Platform {
 
             // The parts bring their own register access; never batch under the live EC
             this.BatchUnderEcLock = false;
+
+            InitFanSafety();
 
         }
 
@@ -159,6 +164,17 @@ namespace OmenMon.Hardware.Platform {
                 preset.ManualValueOn,
                 preset.ManualValueOff);
 
+        }
+
+        // Puts every fan-level write under the fan-safety rules, judged on this
+        // platform's validated CPU and GPU readings (cached: the guard never reads
+        // hardware itself, the monitor and the program tick keep the readings current)
+        private void InitFanSafety() {
+            this.Fans.Guard = new FanSafetyGuard(
+                FanSafetyPolicy.FromConfig(),
+                () => GetCpuReading(false),
+                () => GetGpuReading(false),
+                () => PlatformClock.UtcNow);
         }
 
         // Initializes the system settings

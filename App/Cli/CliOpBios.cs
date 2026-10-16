@@ -4,6 +4,7 @@
 
 using System;
 using OmenMon.Hardware.Bios;
+using OmenMon.Hardware.Platform;
 using OmenMon.Library;
 
 namespace OmenMon.AppCli {
@@ -105,6 +106,15 @@ namespace OmenMon.AppCli {
                 Conv.GetByte(level[0], out levelValue[0]);
                 Conv.GetByte(level[1], out levelValue[1]);
 
+                // The same fan-safety rules as for every other fan-level write: a floor
+                // unless the system is known to be cool. The CLI runs no sensor sweep,
+                // so the CPU temperature is the BIOS one (WMI 0x23, no EC access).
+                byte[] requested = levelValue;
+                levelValue = CliFanSafetyGuard().Filter(requested);
+                if(levelValue[0] != requested[0] || levelValue[1] != requested[1])
+                    Cli.PrintError(String.Format(Config.Locale.Get("ErrFanLevelFloor"),
+                        requested[0], requested[1], levelValue[0], levelValue[1]));
+
                 // Output the updated fan levels and send them to the BIOS
                 Cli.PrintBiosResult(true, String.Format(message, 1), levelValue[0], Enum.GetName(typeof(TFanType), 1));
                 Cli.PrintBiosResult(true, String.Format(message, 2), levelValue[1], Enum.GetName(typeof(TFanType), 2));
@@ -112,6 +122,19 @@ namespace OmenMon.AppCli {
             } catch {
                 App.Error("ErrNeedValueFanLevel|DataSyntaxFanLevel");
             }
+        }
+
+        // A fan-safety guard judged on the BIOS CPU temperature, for one CLI command
+        private static FanSafetyGuard CliFanSafetyGuard() {
+            DateTime now = DateTime.UtcNow;
+            SensorReading cpu = SensorReading.None;
+            try {
+                byte t = Hw.BiosGet(Hw.Bios.GetTemperature);
+                if(t > 0 && t <= Config.MaxBelievableTemperature)
+                    cpu = new SensorReading(t, now);
+            } catch { }
+            return new FanSafetyGuard(FanSafetyPolicy.FromConfig(),
+                () => cpu, () => SensorReading.None, () => now);
         }
 
         // Sets the BIOS LED animation table based on the values parsed from the command line

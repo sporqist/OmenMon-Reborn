@@ -172,8 +172,9 @@ namespace OmenMon.Hardware.Platform {
             // Set the state flag
             this.IsSuspended = true;
 
-            // Reset fan speed
-            SetFanLevel(new byte[] { Byte.MaxValue, Byte.MaxValue } );
+            // Hand fan control back to the BIOS (a safe last level, then 255/255;
+            // see FanSafetyGuard.HandBackLevel)
+            this.Platform.Fans.Release();
 
             // Disable manual fan mode
             if(Config.FanLevelNeedManual)
@@ -197,8 +198,9 @@ namespace OmenMon.Hardware.Platform {
             if(!this.IsEnabled)
                 return false;
 
-            // Reset fan speed
-            SetFanLevel(new byte[] { Byte.MaxValue, Byte.MaxValue } );
+            // Hand fan control back to the BIOS (a safe last level, then 255/255;
+            // see FanSafetyGuard.HandBackLevel)
+            this.Platform.Fans.Release();
 
             // Disable manual fan mode
             if(Config.FanLevelNeedManual)
@@ -378,22 +380,17 @@ namespace OmenMon.Hardware.Platform {
             // the CPU fan but silently no-op for the GPU. Only clear when the
             // latch is actually set so we don't trample on intentional state
             // managed by the user / GUI in between program ticks.
-            // Deliberately do NOT clear the "Max Fan" latch here — that is the
-            // safety override used by Thermal Panic, and clearing it on every
-            // tick would defeat it (GuiOp.CheckThermalPanic asserts max only on
-            // the transition into panic, not on every refresh).
+            // Deliberately do NOT clear the "Max Fan" latch here either: it is a
+            // separate user choice. (Thermal panic no longer uses it; it raises the
+            // levels through the fan-safety guard, which also applies to this write.)
             try {
                 if(this.Platform.Fans.GetOff())
                     this.Platform.Fans.SetOff(false);
             } catch { }
 
-            // Set the fan levels
-            this.Platform.Fans.SetLevels(level);
-
-            // Note: this does not currently handle the case when both fans are being set to 0
-            // since this is not allowed by the hardware through this call, and would depend
-            // on calling Fans.SetOff(true) instead; not implemented due to possible long-term
-            // implications of the fans being switched off for extended periods of time
+            // Set the fan levels (through the fan-safety guard: the floor applies unless
+            // the system is cool, and an active thermal panic raises the levels)
+            this.Platform.Fans.SetLevels(level, FanLevelSource.Program);
 
         }
 

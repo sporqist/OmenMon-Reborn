@@ -374,6 +374,7 @@ namespace OmenMon.Library.Locale {
                 ["ProgLvl"] = "Lvl",
                 ["ProgT"] = "T",
                 ["ProgSensorUnknown"] = "temperature unknown: safe level",
+                ["ErrFanLevelFloor"] = "Fan level {0}, {1} raised to {2}, {3}: the CPU temperature is unknown or not below the fan-safety threshold",
                 ["ProgSubMax"] = "max",
 
                 // Units

@@ -473,9 +473,14 @@ namespace OmenMon.AppGui {
             if(fullRequest)
                 this.FullSamplePending = false;
 
+            // While the fan-safety guard supervises a level (Fan Off or another level
+            // below the floor, thermal panic), sample on every icon tick even with the
+            // form hidden and no dynamic icon, so it sees the system warm up
+            bool supervise = op.Platform.Fans.NeedsSupervision;
+
             bool sample = fullRequest
                 || (monitorFire && formVisible)
-                || (iconFire && (dynamicIcon || panicActive));
+                || (iconFire && (dynamicIcon || panicActive || supervise));
             if(sample) {
                 lock(op.HardwareLock) {
                     MonitorSnapshot s = Sample(formVisible || fullRequest, programRefreshedTemps);
@@ -483,6 +488,10 @@ namespace OmenMon.AppGui {
                     // (sensors were refreshed by Sample or the program tick just before);
                     // with no valid reading it keeps its current state.
                     op.CheckThermalPanic(op.Platform.GetHottestReading(false));
+                    // Fan safety on the same fresh readings: raise a level that is no
+                    // longer allowed (warmed up, sensors stopped reading, Fan Off time
+                    // up) and re-send the panic level while panic is active
+                    op.Platform.Fans.Supervise();
                     this.CurrentSnapshot = s;
                 }
             }
@@ -501,8 +510,12 @@ namespace OmenMon.AppGui {
             if(this.HeartbeatAccumMs >= Config.BiosHeartbeatInterval) {
                 this.HeartbeatAccumMs = 0;
                 lock(Context.Op.HardwareLock) {
-                    if(!Config.BiosHeartbeatPauseOnBattery
+                    // Quiet for a while after handing fan control back to the BIOS: on
+                    // 8BAC the 0x10 query keeps the last fan level alive, so the BIOS
+                    // curve could never take over (see FanSafetyGuard.HandBackLevel)
+                    if((!Config.BiosHeartbeatPauseOnBattery
                         || Context.Op.Platform.System.IsFullPowerConfirmed())
+                        && Context.Op.Platform.Fans.HeartbeatAllowed)
                         try { BiosCtl.Instance.GetFanCount(); } catch { }
                 }
             }
