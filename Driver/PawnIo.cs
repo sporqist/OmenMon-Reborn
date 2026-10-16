@@ -180,7 +180,7 @@ namespace OmenMon.Driver {
         // rebuilding the C# project.
         private static byte[] LoadModuleBlob() {
             try {
-                string exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                string exeDir = AppDomain.CurrentDomain.BaseDirectory; // also right for single-file builds
                 if(!string.IsNullOrEmpty(exeDir)) {
                     string side = Path.Combine(exeDir, SideBySideBlobName);
                     if(File.Exists(side))

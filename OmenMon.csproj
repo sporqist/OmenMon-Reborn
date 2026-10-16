@@ -39,7 +39,7 @@
     <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
     <!-- OmenMon.exe.config is deliberately not deployed (see the file), so do not generate one -->
     <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
-    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.4.11.0</AssemblyVersion>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.5.0.0</AssemblyVersion>
     <AssemblyVersionWord Condition="'$(AssemblyVersionWord)' == ''">reborn</AssemblyVersionWord>
     <!-- The test project lives below this directory; keep its sources out of the default globs -->
     <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;wiki\**;docs\**</DefaultItemExcludes>

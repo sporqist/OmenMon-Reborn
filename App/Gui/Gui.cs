@@ -170,7 +170,7 @@ namespace OmenMon.AppGui {
 
         // Removes the callback for power event notifications
         public static bool UnregisterSuspendResumeNotification() {
-            return RegistrationHandle != null ?
+            return RegistrationHandle != IntPtr.Zero ?
                 PowrProf.PowerUnregisterSuspendResumeNotification(RegistrationHandle) == 0
                 : true;
         }

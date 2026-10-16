@@ -139,17 +139,6 @@ namespace OmenMon.External {
             FileAttributes dwFlagsAndAttributes,
             IntPtr hTemplateFile);
 
-        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        public static extern bool DeviceIoControl (
-            SafeFileHandle device,
-            IOControlCode ioControlCode,
-            [MarshalAs(UnmanagedType.AsAny)] [In] object inBuffer,
-            uint inBufferSize,
-            [MarshalAs(UnmanagedType.AsAny)] [Out] object outBuffer,
-            uint nOutBufferSize,
-            out uint bytesReturned,
-            IntPtr overlapped);
 
         // Power management — returns the previous ExecutionState on success, or 0 on failure.
         // OmenMon calls this from Library/PowerGuard to suppress hibernate during transient
