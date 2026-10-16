@@ -21,6 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 - **Manual fan levels on boards that need a pre-call (8BAC).** `SetFanLevel` sends a fan count query (type 0x10, 1-byte input) right before the fan level call (type 0x2E), like the Linux hp-wmi driver. Harmless on boards that do not need it.
+### Added
+
+- **`FanProgramSharedTemperature` option** (default `false`): both fans follow the higher of the CPU and GPU temperatures, for laptops whose CPU and GPU share heat pipes. On 8BAC under an 80 W GPU load: GPU peak 78 → 73 °C at about the same total fan speed.
 
 ## [1.5.0-reborn] - 2026-09-19
 

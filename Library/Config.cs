@@ -378,6 +378,9 @@ namespace OmenMon.Library {
                     if(GetBool(xml, XmlPrefix + "FanProgramModeCheckFirst", out flag))
                         FanProgramModeCheckFirst = flag;
 
+                    if(GetBool(xml, XmlPrefix + "FanProgramSharedTemperature", out flag))
+                        FanProgramSharedTemperature = flag;
+
                     if(GetBool(xml, XmlPrefix + "FanProgramSuspend", out flag))
                         FanProgramSuspend = flag;
 
@@ -893,6 +896,7 @@ namespace OmenMon.Library {
             SetString(xml, XmlPrefix + "FanProgramDefault", FanProgramDefault);
             SetString(xml, XmlPrefix + "FanProgramDefaultAlt", FanProgramDefaultAlt);
             SetBool(xml, XmlPrefix + "FanProgramModeCheckFirst", FanProgramModeCheckFirst);
+            SetBool(xml, XmlPrefix + "FanProgramSharedTemperature", FanProgramSharedTemperature);
             SetBool(xml, XmlPrefix + "FanProgramSuspend", FanProgramSuspend);
 
             // Fan programs

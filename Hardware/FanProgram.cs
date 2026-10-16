@@ -302,6 +302,11 @@ namespace OmenMon.Hardware.Platform {
             byte cpuTemp = ClampTemperature(cpu.Value);
             byte gpuTemp = gpu.HasValue ? ClampTemperature(gpu.Value) : cpuTemp;
 
+            // Both fans follow the hotter chip when configured to share it
+            // (common heat pipes, e.g. 8BAC); otherwise each fan follows its own
+            if(Config.FanProgramSharedTemperature)
+                cpuTemp = gpuTemp = Math.Max(cpuTemp, gpuTemp);
+
             // CPU fan speed from the CPU-temperature row,
             // GPU fan speed from the GPU-temperature row
             byte[] cpuFans = GetFanLevel(GetTemperatureLevel(cpuTemp));

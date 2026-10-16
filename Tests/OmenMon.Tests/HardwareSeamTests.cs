@@ -23,20 +23,29 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
-        public void BiosCtl_EncodesFanLevelAsType2E() {
+        public void BiosCtl_EncodesFanLevelAsType2E_AfterFanCountQuery() {
             var rig = new TestRig();
             rig.BiosCtl.SetFanLevel(new byte[] { 30, 33 });
-            var call = Assert.Single(rig.Bios.Calls);
-            Assert.Equal(0x2Eu, call.Type);
-            Assert.Equal(new byte[] { 30, 33, 0, 0 }, call.Data);
+            Assert.Equal(2, rig.Bios.Calls.Count);
+            Assert.Equal(0x10u, rig.Bios.Calls[0].Type);
+            Assert.Equal(0x2Eu, rig.Bios.Calls[1].Type);
+            Assert.Equal(new byte[] { 30, 33, 0, 0 }, rig.Bios.Calls[1].Data);
         }
 
         [Fact]
         public void FanLevel_IsIgnoredWithoutPriorFanCountQuery() {
+            // The simulated BIOS itself: a raw 0x2E without a 0x10 in the last 30 s
             var rig = new TestRig();
-            rig.BiosCtl.SetFanLevel(new byte[] { 40, 40 });
+            rig.Bios.Send(BiosData.Cmd.Default, 0x2E, new byte[] { 40, 40, 0, 0 }, 0, out _);
             Assert.Null(rig.Bios.ActiveLevels);
             Assert.Equal(rig.Bios.CurveLevels, rig.BiosCtl.GetFanLevel());
+        }
+
+        [Fact]
+        public void SetFanLevel_TakesEffect_BecauseItQueriesTheFanCountFirst() {
+            var rig = new TestRig();
+            rig.BiosCtl.SetFanLevel(new byte[] { 40, 40 });
+            Assert.Equal(new byte[] { 40, 40 }, rig.Bios.ActiveLevels);
         }
 
         [Fact]
