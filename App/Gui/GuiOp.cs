@@ -89,6 +89,9 @@ namespace OmenMon.AppGui {
             Hw.BiosInit();
             Hw.EcInit();
 
+            // Apply <FanDataPipeServer> (the setting was loaded but never applied)
+            FanDataPipeServer.Configure(Config.FanDataPipeServer);
+
             // Initialize the hardware platform
             this.Platform = new Platform();
 
