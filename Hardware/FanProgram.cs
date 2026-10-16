@@ -397,8 +397,9 @@ namespace OmenMon.Hardware.Platform {
         // Sets up a new fan program to be run
         private bool Setup(string name) {
 
-            // Bail out if referring to a non-existent program
-            if(!Config.FanProgram.ContainsKey(name))
+            // Bail out if referring to a non-existent program (FanProgramDefault is
+            // null when the configuration does not set one; SortedList throws on null)
+            if(string.IsNullOrEmpty(name) || !Config.FanProgram.ContainsKey(name))
                 return false;
 
             // Set up the program name
