@@ -38,6 +38,9 @@ namespace OmenMon.Tests.Fakes {
             Hw.Isolated = true;
             Config.LocaleInit();
 
+            // Flat floor only, unless a test sets the warm curve itself
+            Config.FanSafetyWarmCurve = "none";
+
             // Sensor timestamps follow the simulated clock
             PlatformClock.Source = () => this.Bios.Now;
 

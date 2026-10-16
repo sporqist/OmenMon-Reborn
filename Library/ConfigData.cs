@@ -183,6 +183,10 @@ namespace OmenMon.Library {
         public static byte FanSafetyFloorCpu = 20;
         public static byte FanSafetyFloorGpu = 22;
         public static int FanSafetyCoolTemperature = 50;
+
+        // Minimum levels for manual writes while warm, "temperature:cpu/gpu" ascending
+        // ("none" = flat floor only; empty or invalid = the built-in 60:30/33,70:40/43,80:60/63)
+        public static string FanSafetyWarmCurve = "60:30/33,70:40/43,80:60/63";
         public static int FanOffMaxMinutes = 15;
 
         // Set manual fan mode first using the Embedded Controller before setting fan levels

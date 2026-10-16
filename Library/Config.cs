@@ -344,6 +344,10 @@ namespace OmenMon.Library {
                     if(GetWord(xml, XmlPrefix + "FanOffMaxMinutes", out value) && value >= 1 && value <= 240)
                         FanOffMaxMinutes = value;
 
+                    if(TryGetString(xml, XmlPrefix + "FanSafetyWarmCurve", out string warmCurve)
+                        && OmenMon.Hardware.Platform.SafetyStep.ParseList(warmCurve) != null)
+                        FanSafetyWarmCurve = warmCurve;
+
                     if(GetBool(xml, XmlPrefix + "FanLevelNeedManual", out flag))
                         FanLevelNeedManual = flag;
 
@@ -891,6 +895,7 @@ namespace OmenMon.Library {
             SetUInt(xml, XmlPrefix + "FanSafetyFloorGpu", FanSafetyFloorGpu);
             SetUInt(xml, XmlPrefix + "FanSafetyCoolTemperature", (uint) FanSafetyCoolTemperature);
             SetUInt(xml, XmlPrefix + "FanOffMaxMinutes", (uint) FanOffMaxMinutes);
+            SetString(xml, XmlPrefix + "FanSafetyWarmCurve", FanSafetyWarmCurve);
             SetBool(xml, XmlPrefix + "FanLevelNeedManual", FanLevelNeedManual);
             SetBool(xml, XmlPrefix + "FanLevelUseEc", FanLevelUseEc);
             SetString(xml, XmlPrefix + "FanProgramDefault", FanProgramDefault);

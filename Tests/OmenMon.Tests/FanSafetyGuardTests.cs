@@ -15,7 +15,9 @@ namespace OmenMon.Tests {
         private SensorReading gpu = SensorReading.None;
 
         private FanSafetyGuard NewGuard() {
-            return new FanSafetyGuard(new FanSafetyPolicy(), () => this.cpu, () => this.gpu, () => this.now);
+            // The flat floor on its own; the warm curve has its own tests (WarmCurveTests)
+            return new FanSafetyGuard(new FanSafetyPolicy { WarmCurve = new SafetyStep[0] },
+                () => this.cpu, () => this.gpu, () => this.now);
         }
 
         private void Cpu(int celsius) { this.cpu = new SensorReading(celsius, this.now); }
