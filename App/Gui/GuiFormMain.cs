@@ -283,40 +283,38 @@ namespace OmenMon.AppGui {
         }
 
         // Handles the fan settings button being clicked
+        //
+        // All fan hardware calls happen under HardwareLock, in one block, so the monitor
+        // thread (fan program tick, countdown maintenance, thermal panic, supervision)
+        // cannot interleave with the multi-step sequences below. Dialogs are shown first,
+        // without the lock: a modal dialog must never hold it.
         private void EventActionFanSet(object sender, EventArgs e) {
 
-            // Query fan state
-            bool isFanMax = Context.Op.Platform.Fans.GetMax();
-            bool isFanOff = Context.Op.Platform.Fans.GetOff();
+            // Query fan state (for the questions below; re-read under the lock after)
+            bool isFanMax, isFanOff;
+            lock(Context.Op.HardwareLock) {
+                isFanMax = Context.Op.Platform.Fans.GetMax();
+                isFanOff = Context.Op.Platform.Fans.GetOff();
+            }
 
-            // Pause the monitor's constant-speed countdown maintenance while we reconfigure,
-            // so it cannot issue a SetMode/SetCountdown in the middle of this change. It is
-            // re-evaluated from the resulting radio state at the end of the method.
-            Context.Op.ConstantSpeedActive = false;
+            // Ask first: nothing has changed yet if the user cancels
+            string program = null;
+            PerformancePreset presetAsk = PerformancePreset.Default;
+            bool bothMin = this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Minimum
+                && this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Minimum;
+            bool bothMax = this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Maximum
+                && this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Maximum;
 
-            // Enable fan program
             if(this.RdoFanProg.Checked) {
 
                 if(this.CmbFanProg.SelectedValue != null
                     && (string) this.CmbFanProg.SelectedValue != ""
                     && Config.FanProgram.ContainsKey(
-                        (string) this.CmbFanProg.SelectedValue)) {
+                        (string) this.CmbFanProg.SelectedValue))
 
-                    if(isFanOff) // Re-enable fan if off first
-                        Context.Op.Platform.Fans.SetOff(false);
+                    program = (string) this.CmbFanProg.SelectedValue;
 
-                    if(isFanMax) // Disable maximum speed first
-                        Context.Op.Platform.Fans.SetMax(false);
-
-                    // Start the selected program (locked: serialise with the monitor's
-                    // fan-program tick so FanProgram state is never mutated concurrently)
-                    lock(Context.Op.HardwareLock)
-                        Context.Op.Program.Run((string) this.CmbFanProg.SelectedValue);
-
-                    // Delay the monitor's next program tick — Run() above already applied the curve
-                    Context.Monitor?.ResetProgramTick();
-
-                } else {
+                else {
 
                     MessageBox.Show(
                         this, // Modal
@@ -325,164 +323,184 @@ namespace OmenMon.AppGui {
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Exclamation);
 
-                }
-
-            // Switch off the fan
-            } else if(this.RdoFanOff.Checked) {
-
-                // Terminate any running fan program (locked: serialise with the monitor's
-                // fan-program tick so FanProgram state is never mutated concurrently)
-                lock(Context.Op.HardwareLock)
-                    Context.Op.Program.Terminate();
-
-                if(!isFanOff) { // Skip if already off
-
-                    if(isFanMax) // Disable maximum speed first
-                        Context.Op.Platform.Fans.SetMax(false);
-
-                    // Switch off the fan
-                    Context.Op.Platform.Fans.SetOff(true);
+                    // Nothing to do (this used to fall through and only reset the button)
+                    this.BtnFanSet.Checked = false;
+                    return;
 
                 }
 
-            // Set fan to maximum speed
             } else if(this.RdoFanMax.Checked) {
 
-                // Terminate any running fan program (locked: serialise with the monitor's
-                // fan-program tick so FanProgram state is never mutated concurrently)
-                lock(Context.Op.HardwareLock)
-                    Context.Op.Program.Terminate();
-
-                if(!isFanMax) { // Skip if already maximum speed
-
-                     // Centralised safety warning for models with known 100% fan freeze.
-                     if(!GuiOp.ConfirmMaxFanIfRisky(Context.Op.Platform.System.GetProduct())) {
-                         // User declined — revert fan UI to previous state
-                         UpdateFanCtl();
-                         return;
-                     }
-
-                     if(isFanOff) // Re-enable fan if off first
-                         Context.Op.Platform.Fans.SetOff(false);
-
-                     // Set the fan to maximum speed
-                     Context.Op.Platform.Fans.SetMax(true);
-
+                // Centralised safety warning for models with known 100% fan freeze
+                if(!isFanMax && !GuiOp.ConfirmMaxFanIfRisky(Context.Op.Platform.System.GetProduct())) {
+                    // User declined: revert fan UI to the current state
+                    this.BtnFanSet.Checked = false;
+                    UpdateFanCtl();
+                    return;
                 }
 
-            // Enable fan constant speed
             } else if(this.RdoFanConst.Checked) {
 
-                // Terminate any running fan program (locked: serialise with the monitor's
-                // fan-program tick so FanProgram state is never mutated concurrently)
-                lock(Context.Op.HardwareLock)
-                    Context.Op.Program.Terminate();
-
-                // The BIOS mandates that at least one fan
-                // be left running at any given time, so if the user
-                // wants both of them off, we use another way to do so
-                if(this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Minimum
-                    && this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Minimum) {
-
-                    // Switch the fans off
-                    if(!isFanOff) // If not already off
-                        Context.Op.Platform.Fans.SetOff(true);
-
-                // Conversely, if the user wants maximum speed setting
-                // for both fans, we just set it explicitly instead
-                } else if(this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Maximum
-                    && this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Maximum) {
-
-                    // Centralised safety warning for models with known 100% fan freeze.
-                    if(!GuiOp.ConfirmMaxFanIfRisky(Context.Op.Platform.System.GetProduct())) {
-                        // User declined — revert trackbars to safe values (70%)
-                        int safeMax = (int)(this.TrkFan0Lvl.Maximum * 0.7);
-                        this.TrkFan0Lvl.Value = safeMax;
-                        this.TrkFan1Lvl.Value = safeMax;
-                        // Fall through to set the safe levels below
-                    }
-
-                    // Set the fans to maximum speed (or safe level if user cancelled above)
-                    if(!isFanMax && this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Maximum
-                        && this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Maximum) // If not already at maximum speed
-                        Context.Op.Platform.Fans.SetMax(true);
-                    else if(this.TrkFan0Lvl.Value != this.TrkFan0Lvl.Maximum
-                        || this.TrkFan1Lvl.Value != this.TrkFan1Lvl.Maximum) {
-                        // User chose safe levels — apply them
-                        if(isFanMax)
-                            Context.Op.Platform.Fans.SetMax(false);
-                        if(isFanOff)
-                            Context.Op.Platform.Fans.SetOff(false);
-                        Context.Op.Platform.Fans.SetLevels(new byte[] {
-                            (byte) this.TrkFan0Lvl.Value,
-                            (byte) this.TrkFan1Lvl.Value});
-                        // Reset the fan mode so the new levels are latched
-                        Context.Op.Platform.Fans.SetMode(
-                            Context.Op.Platform.Fans.GetMode());
-                    }
-
-                // Otherwise, we just set the speed levels normally
-                } else {
-
-                    if(isFanMax) // Disable maximum speed first
-                        Context.Op.Platform.Fans.SetMax(false);
-		    
-                    if(isFanOff) // Re-enable fan if off first
-                        Context.Op.Platform.Fans.SetOff(false);
-
-                    // Set each fan to the user-selected level
-                    // or to zero, if the minimum value is selected
-                    Context.Op.Platform.Fans.SetLevels(new byte[] {
-                        this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Minimum ? (byte) 0 : (byte) this.TrkFan0Lvl.Value,
-                        this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Minimum ? (byte) 0 : (byte) this.TrkFan1Lvl.Value});
-                    // Note: this won't work for setting both fans to zero
-                    // but that case will have already been handled at this point
-
-                    // Reset the fan mode so that the settings are applied
-                    Context.Op.Platform.Fans.SetMode(
-                        Context.Op.Platform.Fans.GetMode());
-
+                // Centralised safety warning for models with known 100% fan freeze
+                if(bothMax && !GuiOp.ConfirmMaxFanIfRisky(Context.Op.Platform.System.GetProduct())) {
+                    // User declined: revert trackbars to safe values (70%) and set those
+                    int safeMax = (int)(this.TrkFan0Lvl.Maximum * 0.7);
+                    this.TrkFan0Lvl.Value = safeMax;
+                    this.TrkFan1Lvl.Value = safeMax;
+                    bothMax = false;
                 }
 
-            // Enable automatic fan mode (default)
             } else if(this.RdoFanAuto.Checked) {
 
-                // Terminate any running fan program (locked: serialise with the monitor's
-                // fan-program tick so FanProgram state is never mutated concurrently)
-                lock(Context.Op.HardwareLock)
-                    Context.Op.Program.Terminate();
-
                 // The requested performance preset (not a BIOS fan mode)
-                PerformancePreset presetAsk;
                 if(!PerformancePresets.TryParse((string) this.CmbFanMode.SelectedValue, out presetAsk))
                     presetAsk = PerformancePreset.Default;
 
-                if(isFanOff) // Re-enable fan if off first
-                    Context.Op.Platform.Fans.SetOff(false);
-
-                if(isFanMax) // Disable maximum speed first
-                    Context.Op.Platform.Fans.SetMax(false);
-
                 // Custom: remember the trackbar levels as the preset's levels. The BIOS
                 // mode stays the configured <CustomPreset><Mode> (this used to be
-                // overwritten with "Custom", sent to the BIOS as mode 0x63).
+                // overwritten with "Custom", sent to the BIOS as mode 0x63). Saved
+                // before taking the lock, since a failed save shows a message box.
                 if(presetAsk == PerformancePreset.Custom) {
                     Config.CustomPresetCpuLevel = (byte) this.TrkFan0Lvl.Value;
                     Config.CustomPresetGpuLevel = (byte) this.TrkFan1Lvl.Value;
                     Config.Save();
                 }
 
-                // Hand back any OmenMon-held levels, then apply the preset
-                Context.Op.ApplyPreset(presetAsk);
+            }
+
+            byte level0 = (byte) this.TrkFan0Lvl.Value;
+            byte level1 = (byte) this.TrkFan1Lvl.Value;
+            bool level0Min = this.TrkFan0Lvl.Value == this.TrkFan0Lvl.Minimum;
+            bool level1Min = this.TrkFan1Lvl.Value == this.TrkFan1Lvl.Minimum;
+
+            lock(Context.Op.HardwareLock) {
+
+                // The state may have changed while a dialog was open
+                isFanMax = Context.Op.Platform.Fans.GetMax();
+                isFanOff = Context.Op.Platform.Fans.GetOff();
+
+                // Pause the monitor's constant-speed countdown maintenance while we
+                // reconfigure; it is re-evaluated from the resulting radio state below
+                Context.Op.ConstantSpeedActive = false;
+
+                // Enable fan program
+                if(program != null) {
+
+                    if(isFanOff) // Re-enable fan if off first
+                        Context.Op.Platform.Fans.SetOff(false);
+
+                    if(isFanMax) // Disable maximum speed first
+                        Context.Op.Platform.Fans.SetMax(false);
+
+                    // Start the selected program
+                    Context.Op.Program.Run(program);
+
+                // Switch off the fan
+                } else if(this.RdoFanOff.Checked) {
+
+                    // Terminate any running fan program
+                    Context.Op.Program.Terminate();
+
+                    if(!isFanOff) { // Skip if already off
+
+                        if(isFanMax) // Disable maximum speed first
+                            Context.Op.Platform.Fans.SetMax(false);
+
+                        // Switch off the fan
+                        Context.Op.Platform.Fans.SetOff(true);
+
+                    }
+
+                // Set fan to maximum speed
+                } else if(this.RdoFanMax.Checked) {
+
+                    // Terminate any running fan program
+                    Context.Op.Program.Terminate();
+
+                    if(!isFanMax) { // Skip if already maximum speed
+
+                        if(isFanOff) // Re-enable fan if off first
+                            Context.Op.Platform.Fans.SetOff(false);
+
+                        // Set the fan to maximum speed
+                        Context.Op.Platform.Fans.SetMax(true);
+
+                    }
+
+                // Enable fan constant speed
+                } else if(this.RdoFanConst.Checked) {
+
+                    // Terminate any running fan program
+                    Context.Op.Program.Terminate();
+
+                    // The BIOS mandates that at least one fan
+                    // be left running at any given time, so if the user
+                    // wants both of them off, we use another way to do so
+                    if(bothMin) {
+
+                        // Switch the fans off
+                        if(!isFanOff) // If not already off
+                            Context.Op.Platform.Fans.SetOff(true);
+
+                    // Conversely, if the user wants maximum speed setting
+                    // for both fans, we just set it explicitly instead
+                    } else if(bothMax) {
+
+                        if(!isFanMax) // If not already at maximum speed
+                            Context.Op.Platform.Fans.SetMax(true);
+
+                    // Otherwise, we just set the speed levels normally
+                    } else {
+
+                        if(isFanMax) // Disable maximum speed first
+                            Context.Op.Platform.Fans.SetMax(false);
+
+                        if(isFanOff) // Re-enable fan if off first
+                            Context.Op.Platform.Fans.SetOff(false);
+
+                        // Set each fan to the user-selected level
+                        // or to zero, if the minimum value is selected
+                        // (the fan-safety guard floors a zero while warm)
+                        Context.Op.Platform.Fans.SetLevels(new byte[] {
+                            level0Min ? (byte) 0 : level0,
+                            level1Min ? (byte) 0 : level1});
+
+                        // Reset the fan mode so that the settings are applied
+                        Context.Op.Platform.Fans.SetMode(
+                            Context.Op.Platform.Fans.GetMode());
+
+                    }
+
+                // Enable automatic fan mode (default)
+                } else if(this.RdoFanAuto.Checked) {
+
+                    // Terminate any running fan program
+                    Context.Op.Program.Terminate();
+
+                    if(isFanOff) // Re-enable fan if off first
+                        Context.Op.Platform.Fans.SetOff(false);
+
+                    if(isFanMax) // Disable maximum speed first
+                        Context.Op.Platform.Fans.SetMax(false);
+
+                    // Hand back any OmenMon-held levels, then apply the preset
+                    Context.Op.ApplyPreset(presetAsk);
+
+                }
+
+                // Re-evaluate constant-speed maintenance for the monitor
+                Context.Op.ConstantSpeedActive = this.RdoFanConst.Checked;
 
             }
+
+            // Delay the monitor's next program tick: Run() above already applied the curve
+            if(program != null)
+                Context.Monitor?.ResetProgramTick();
 
             // Restore the default button look
             this.BtnFanSet.Checked = false;
 
-            // Re-evaluate constant-speed maintenance for the monitor from the resulting
-            // mode, then publish a fresh snapshot so the form reflects the change at once.
-            Context.Op.ConstantSpeedActive = this.RdoFanConst.Checked;
+            // Publish a fresh snapshot so the form reflects the change at once
             Context.Monitor?.SampleNow();
 
         }
