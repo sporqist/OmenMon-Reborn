@@ -127,8 +127,13 @@ namespace OmenMon.AppGui {
         public void AutoConfig() {
 
             // Set whether the application should start automatically with Windows
-            // (Task Scheduler, not an EC/BIOS call — kept outside the hardware lock)
-            Hw.TaskSet(Config.TaskId.Gui, Config.AutoStartup);
+            // (Task Scheduler, not an EC/BIOS call — kept outside the hardware lock).
+            // The task name is shared by every copy, so a copy not set to start
+            // automatically only removes a task that starts this very executable:
+            // a portable or test copy must not unregister the installed one
+            // (happened on hardware, 2026-10-16)
+            if(Config.AutoStartup || Hw.TaskIsOwn(Config.TaskId.Gui))
+                Hw.TaskSet(Config.TaskId.Gui, Config.AutoStartup);
 
             // AutoConfig runs on its own background thread, concurrently with the monitor
             // thread, so its hardware control sequence is serialised under HardwareLock.

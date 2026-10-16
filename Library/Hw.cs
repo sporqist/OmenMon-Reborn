@@ -475,6 +475,25 @@ namespace OmenMon.Library {
             return Os.HasTask(Config.TaskFolder, Config.Task[task][0]);
         }
 
+        // Whether a specific task exists and starts this very executable
+        // (the task names are shared by every copy of the application)
+        public static bool TaskIsOwn(Config.TaskId task) {
+            string command = Os.GetTaskCommand(Config.TaskFolder, Config.Task[task][0]);
+            return command != null && IsSameFile(command, Config.AppFile);
+        }
+
+        // Compares two executable paths as the Task Scheduler would resolve them
+        internal static bool IsSameFile(string a, string b) {
+            try {
+                return string.Equals(
+                    System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(a.Trim().Trim('"'))),
+                    System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(b.Trim().Trim('"'))),
+                    StringComparison.OrdinalIgnoreCase);
+            } catch {
+                return false;
+            }
+        }
+
         // Installs or removes a specific task
         public static void TaskSet(Config.TaskId task, bool flag) {
             using WmiEvent wmiEvent = new WmiEvent();

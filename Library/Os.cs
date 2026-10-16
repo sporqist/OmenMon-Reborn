@@ -457,6 +457,39 @@ namespace OmenMon.Library {
             }
 
         }
+
+        // Returns the executable path of a scheduled task's first action,
+        // or null if the task does not exist or its first action is not an executable
+        public static string GetTaskCommand(string folderName, string taskName) {
+
+            // Set up a Task Service instance and connect to it
+            TaskSchd.ITaskService service = (TaskSchd.ITaskService) new TaskSchd.TaskSchedulerClass();
+            service.Connect();
+
+            // Open the specified task folder
+            TaskSchd.ITaskFolder folder = service.GetFolder(folderName);
+
+            try {
+
+                // The action collection is one-based
+                TaskSchd.IActionCollection actions = folder.GetTask(taskName).Definition.Actions;
+                return actions.Count > 0 && actions[1] is TaskSchd.IExecAction exec ? exec.Path : null;
+
+            } catch {
+
+                // Any error means there is no such task to report on
+                return null;
+
+            // Clean up even if the call failed
+            } finally {
+
+                // Release the COM objects
+                Marshal.ReleaseComObject(folder);
+                Marshal.ReleaseComObject(service);
+
+            }
+
+        }
 #endregion
 
 #region Window Manipulation
