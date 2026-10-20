@@ -305,6 +305,133 @@ namespace OmenMon.Tests {
             Assert.All(sensors.Cast<XmlElement>(), s => Assert.Equal("false", s.GetAttribute("Use")));
         }
 
+        private static string? Value(XmlDocument xml, string name) {
+            return xml.SelectSingleNode("OmenMon/Config/" + name)?.InnerText;
+        }
+
+        // Replaces one value in the file, as a hand edit in an editor would
+        private void EditFile(string name, string value) {
+            XmlDocument xml = new XmlDocument();
+            xml.Load(File_);
+            XmlNode? node = xml.SelectSingleNode("OmenMon/Config/" + name);
+            if(node == null)
+                node = xml.SelectSingleNode("OmenMon/Config")!.AppendChild(xml.CreateElement(name))!;
+            node.InnerText = value;
+            xml.Save(File_);
+        }
+
+        private const string ScalarFixture = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<OmenMon>
+    <Config>
+        <!-- Fan safety -->
+        <FanSafetyFloorCpu>25</FanSafetyFloorCpu>
+        <FanSafetyFloorGpu>22</FanSafetyFloorGpu>
+        <FanSafetyWarmCurve>60:30/33,70:40/43,80:60/63</FanSafetyWarmCurve>
+        <!-- Tip -->
+        <GuiTipDuration>30000</GuiTipDuration>
+        <GuiStayOnTop>true</GuiStayOnTop>
+        <EcRetryLimit>0</EcRetryLimit>
+        <AutoStartup Note=""mine"">false</AutoStartup>
+        <BiosErrorReporting><!-- keep -->true</BiosErrorReporting>
+        <EcFailLimit>15</EcFailLimit>
+        <EcFailLimit>20</EcFailLimit>
+        <KeyCustomAction>
+            <Enabled>false</Enabled>
+            <ExecCmd></ExecCmd>
+        </KeyCustomAction>
+    </Config>
+</OmenMon>
+";
+
+        [Fact]
+        public void Save_DefaultsInTheFile_AreRemoved_OtherValuesAndCommentsStay() {
+            File.WriteAllText(File_, ScalarFixture);
+            Config.Load();
+            XmlDocument xml = SaveAndRead();
+
+            // Fan safety follows the defaults unless set otherwise
+            Assert.Equal("25", Value(xml, "FanSafetyFloorCpu"));
+            Assert.Null(Value(xml, "FanSafetyFloorGpu"));
+            Assert.Null(Value(xml, "FanSafetyWarmCurve"));
+            Assert.Null(Value(xml, "GuiTipDuration"));
+            Assert.Null(xml.SelectSingleNode("OmenMon/Config/KeyCustomAction")); // emptied
+            Assert.Equal("true", Value(xml, "GuiStayOnTop"));
+            Assert.Equal("0", Value(xml, "EcRetryLimit"));          // invalid, not loaded: left alone
+            Assert.Equal("false", Value(xml, "AutoStartup"));       // has an attribute
+            Assert.NotNull(xml.SelectSingleNode("OmenMon/Config/BiosErrorReporting/comment()"));
+            Assert.Equal(2, xml.SelectNodes("OmenMon/Config/EcFailLimit")!.Count); // the second would load
+            string text = File.ReadAllText(File_);
+            Assert.Contains("Fan safety", text);
+            Assert.Contains("Tip", text);
+
+            // Nothing at its default is added
+            Assert.Null(Value(xml, "AutoConfig"));
+            Assert.Null(Value(xml, "ThermalPanicTemperature"));
+            Assert.Null(xml.SelectSingleNode("OmenMon/CustomPreset"));
+
+            // What remains loads as before
+            Config.FanSafetyFloorCpu = 20;
+            Config.GuiStayOnTop = false;
+            Config.Load();
+            Assert.Equal(25, Config.FanSafetyFloorCpu);
+            Assert.Equal(22, Config.FanSafetyFloorGpu);
+            Assert.True(Config.GuiStayOnTop);
+        }
+
+        [Fact]
+        public void Save_ChangedValues_AreWritten_OrRemovedWhenBackAtTheDefault() {
+            File.WriteAllText(File_, ScalarFixture);
+            Config.Load();
+            Config.FanSafetyFloorCpu = 20;      // back to the default
+            Config.FanSafetyFloorGpu = 30;
+            Config.EcoPlusEnabled = true;       // not in the file yet
+            Config.FanProgramDefault = "Quiet";
+            XmlDocument xml = SaveAndRead();
+            Assert.Null(Value(xml, "FanSafetyFloorCpu"));
+            Assert.Equal("30", Value(xml, "FanSafetyFloorGpu"));
+            Assert.Equal("true", Value(xml, "EcoPlusEnabled"));
+            Assert.Equal("Quiet", Value(xml, "FanProgramDefault"));
+
+            Config.FanSafetyFloorGpu = 22;
+            Config.EcoPlusEnabled = false;
+            xml = SaveAndRead();
+            Assert.Null(Value(xml, "FanSafetyFloorGpu"));
+            Assert.Null(Value(xml, "EcoPlusEnabled"));
+        }
+
+        [Fact]
+        public void Save_HandEditSinceLoad_IsNotReverted() {
+            File.WriteAllText(File_, ScalarFixture);
+            Config.Load();
+
+            // Edited while the application runs, then any setting is changed in it
+            EditFile("FanSafetyFloorCpu", "30");
+            EditFile("FanSafetyWarmCurve", "60:35/38");
+            EditFile("FanProgramDefault", "Venue");
+            Config.TemperatureUseFahrenheit = true;
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("30", Value(xml, "FanSafetyFloorCpu"));
+            Assert.Equal("60:35/38", Value(xml, "FanSafetyWarmCurve"));
+            Assert.Equal("Venue", Value(xml, "FanProgramDefault"));
+            Assert.Equal("true", Value(xml, "TemperatureUseFahrenheit"));
+
+            // A value this session saved is the new baseline: a later edit survives too
+            EditFile("TemperatureUseFahrenheit", "false");
+            EditFile("UpdateIconInterval", "5");
+            Config.GuiDynamicIcon = true;
+            xml = SaveAndRead();
+            Assert.Equal("5", Value(xml, "UpdateIconInterval"));
+
+            // An edit back to the default is removed as a default, which loads the same
+            Assert.Null(Value(xml, "TemperatureUseFahrenheit"));
+
+            // A setting changed in the application wins over an edit of the same setting
+            Config.GuiTipDuration = 5000;
+            EditFile("GuiTipDuration", "10000");
+            xml = SaveAndRead();
+            Assert.Equal("5000", Value(xml, "GuiTipDuration"));
+        }
+
         private static void ResetCustomPreset() {
             Config.CustomPresetFanMode = "Default";
             Config.CustomPresetGpuPower = "Medium";
