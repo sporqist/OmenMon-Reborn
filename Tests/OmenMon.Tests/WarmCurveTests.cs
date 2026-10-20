@@ -29,6 +29,22 @@ namespace OmenMon.Tests {
             this.gpu = gpuC.HasValue ? new GpuReading(new SensorReading(gpuC.Value, this.now), default(DateTime)) : GpuReading.None;
         }
 
+        // After a fan program is handed back, a later panic with nothing requested is a
+        // manual level: the warm curve applies on top of the panic level (before, the
+        // source stayed Program and only the panic level counted)
+        [Fact]
+        public void PanicAfterProgramHandBack_GetsTheCurve() {
+            var g = NewGuard();
+            Temps(65, 66);
+            g.RecordWrite(new byte[] { 30, 30 }, g.Filter(new byte[] { 30, 30 }, FanLevelSource.Program), FanLevelSource.Program);
+            g.RecordRelease();
+            Assert.Equal(FanLevelSource.Manual, g.RequestedSource);
+
+            Temps(88, 91);
+            g.SetPanic(new byte[] { 55, 55 });
+            Assert.Equal(new byte[] { 60, 63 }, g.Supervise());
+        }
+
         // fansafety-0: the GPU read before and its reads now fail; the CPU still reads
         [Fact]
         public void Manual_UnknownGpu_GetsTheTopStep_ParkedGpuDoesNot() {

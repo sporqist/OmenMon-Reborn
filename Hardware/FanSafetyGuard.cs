@@ -326,8 +326,13 @@ namespace OmenMon.Hardware.Platform {
         // that is no longer allowed, refresh the panic level), or null if none
         public byte[] Supervise() {
 
+            // Panic with nothing requested (entered from automatic mode, or after a
+            // hand-back) is judged as a manual level: nothing re-evaluates it, so the
+            // warm safety curve applies on top of the panic level
             if(this.panicLevel != null)
-                return Filter(this.requested ?? new byte[] { 0, 0 }, this.requestedSource);
+                return this.requested != null
+                    ? Filter(this.requested, this.requestedSource)
+                    : Filter(new byte[] { 0, 0 }, FanLevelSource.Manual);
 
             if(this.written == null)
                 return null;
@@ -373,6 +378,7 @@ namespace OmenMon.Hardware.Platform {
             this.released = true;
             this.releasedAt = this.Now;
             this.requested = null;
+            this.requestedSource = FanLevelSource.Manual;
             this.written = null;
             this.belowFloorSince = default(DateTime);
         }
