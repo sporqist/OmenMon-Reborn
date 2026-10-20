@@ -185,6 +185,57 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_AfterAFailedLoad_KeepsACopy_AndWritesOnlyWhatChanged() {
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+
+            // The user fixes the file, then changes a setting before restarting
+            string fixedText = ScalarFixture.Replace("<Config>", @"<Config>
+        <FanProgramDefault>Quiet</FanProgramDefault>
+        <Temperature><Sensor Name=""CPUT"" Source=""EC"" /><Sensor Name=""TMP1"" Source=""EC"" Use=""false"" /></Temperature>
+        <FanPrograms><Program Name=""Quiet""><FanMode>Default</FanMode><GpuPower>Maximum</GpuPower>"
+                + @"<Level Temperature=""00""><Cpu>22</Cpu><Gpu>25</Gpu></Level></Program></FanPrograms>");
+            File.WriteAllText(File_, fixedText);
+            Config.EcoPlusEnabled = true;
+            XmlDocument xml = SaveAndRead();
+
+            string[] backups = Directory.GetFiles(Dir, "OmenMon.xml.unloaded-*.bak");
+            Assert.Single(backups);
+            Assert.Equal(fixedText, File.ReadAllText(backups[0]));
+            Assert.Equal("true", Value(xml, "EcoPlusEnabled"));
+            Assert.Equal("Quiet", Value(xml, "FanProgramDefault"));
+            Assert.Equal("30000", Value(xml, "GuiTipDuration"));       // defaults are not removed either
+            Assert.Equal("22", Value(xml, "FanSafetyFloorGpu"));
+            Assert.Equal(2, xml.SelectNodes("OmenMon/Config/Temperature/Sensor")!.Count);
+            Assert.Equal("false", ((XmlElement) xml.SelectSingleNode("OmenMon/Config/Temperature/Sensor[@Name='TMP1']")!).GetAttribute("Use"));
+            Assert.Null(xml.SelectSingleNode("OmenMon/Config/Temperature/Sensor[@Name='BIOS']"));
+            Assert.Equal("22", Program(xml, "Quiet")!.SelectSingleNode("Level/Cpu")!.InnerText);
+
+            // One copy per session
+            Config.GuiStayOnTop = false;
+            SaveAndRead();
+            Assert.Single(Directory.GetFiles(Dir, "OmenMon.xml.unloaded-*.bak"));
+        }
+
+        [Fact]
+        public void Save_AfterAFailedLoad_FileStillUnreadable_IsLeftAlone() {
+            const string garbage = "<OmenMon><Config><AutoConfig>true</Auto";
+            File.WriteAllText(File_, garbage);
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+            Config.EcoPlusEnabled = true;
+            Assert.ThrowsAny<XmlException>(() => Config.SaveCore());
+            Assert.Equal(garbage, File.ReadAllText(File_));
+            Assert.Empty(Directory.GetFiles(Dir, "*.bak"));
+
+            // Fixed and loaded again, all is well
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Assert.False(Config.LoadFailed);
+        }
+
+        [Fact]
         public void Save_ShippedConfig_RoundTripLosesNothing() {
             string root = AppContext.BaseDirectory;
             while(!File.Exists(Path.Combine(root, "OmenMon.xml")))

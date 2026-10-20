@@ -145,6 +145,14 @@ namespace OmenMon.Library {
         private static readonly HashSet<string> LoadedSensors = new HashSet<string>();
         private static readonly HashSet<string> LoadedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Whether the configuration file exists but could not be loaded: the settings in
+        // use are then (mostly) the defaults, and a save must not write them over the file
+        public static bool LoadFailed { get; private set; }
+
+        // Whether the file has been backed up, and the user told, since loading failed
+        private static bool LoadFailedBackedUp;
+        private static bool LoadFailedReported;
+
         // Each collection entry as it was in memory after loading, or after the last save,
         // in its saved form (null before Load()). On save, an entry that is unchanged is
         // left as the file has it, so a hand edit made since then survives.
@@ -167,6 +175,7 @@ namespace OmenMon.Library {
         // Loads the configuration data from the XML file
         public static void Load() {
             bool strayCustomPreset = false;
+            LoadFailed = false;
 
             // Proceed only if the file exists
             if(FilePath != "" && File.Exists(FilePath)) {
@@ -579,7 +588,10 @@ namespace OmenMon.Library {
 
                 } catch {
 
-                    // Silently ignore any errors
+                    // Carry on with the defaults, but remember that the file did not load:
+                    // saving then keeps a copy and writes only what changes, and the user
+                    // is told (GuiTray, Save())
+                    LoadFailed = true;
 
                 }
 
@@ -830,8 +842,15 @@ namespace OmenMon.Library {
             } catch {
 
                 // Show an error message if the settings could not be saved
-                App.Error("ErrConfigSave");
+                App.Error(LoadFailed ? "ErrConfigSave|ErrConfigLoadStill" : "ErrConfigSave");
+                return;
 
+            }
+
+            // Tell the user once that the file did not load and what was saved
+            if(LoadFailed && !LoadFailedReported) {
+                LoadFailedReported = true;
+                App.Error("ErrConfigLoad|ErrConfigLoadSaved");
             }
         }
 
@@ -867,6 +886,11 @@ namespace OmenMon.Library {
 
                 } catch(XmlException) {
 
+                    // A file that never loaded and still does not parse is left for the
+                    // user to fix: there is nothing to write it from
+                    if(LoadFailed)
+                        throw;
+
                     // Keep the unreadable file, then start from the template
                     File.Copy(FilePath, FilePath + ".unreadable-"
                         + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".bak", true);
@@ -874,6 +898,15 @@ namespace OmenMon.Library {
                     xml.LoadXml(Config.XmlTemplate);
 
                 }
+
+                // The file did not load at the start: keep a copy before the first save
+                // changes it
+                if(fromFile && LoadFailed && !LoadFailedBackedUp) {
+                    File.Copy(FilePath, FilePath + ".unloaded-"
+                        + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".bak", true);
+                    LoadFailedBackedUp = true;
+                }
+
             } else
 
                 // Start with a pre-defined template
@@ -881,7 +914,7 @@ namespace OmenMon.Library {
 
             // Scalar settings: only what changed (see SaveScalars()); starting from the
             // template, all that differs from the defaults, and all collection entries
-            Dictionary<string, string> scalarsSaved = SaveScalars(xml, fromFile);
+            Dictionary<string, string> scalarsSaved = SaveScalars(xml, fromFile, fromFile && !LoadFailed);
             RemoveStrayCustomPreset(xml);
 
             // Color presets
@@ -1080,8 +1113,9 @@ namespace OmenMon.Library {
         // hand edit made to the file since it was loaded survives, and only values that
         // differ from the defaults are kept: a value changed back to its default is
         // removed, and so is one the file holds at its default, so that a later change
-        // of a default reaches the user. Returns the values as saved.
-        private static Dictionary<string, string> SaveScalars(XmlDocument xml, bool fromFile) {
+        // of a default reaches the user (not if the file did not load: removeDefaults is
+        // then false). Returns the values as saved.
+        private static Dictionary<string, string> SaveScalars(XmlDocument xml, bool fromFile, bool removeDefaults) {
             Dictionary<string, string> saved = new Dictionary<string, string>();
             foreach(Scalar scalar in Scalars) {
                 string value = scalar.Value(), fallback = ScalarDefaults[scalar.Path], loaded;
@@ -1107,7 +1141,7 @@ namespace OmenMon.Library {
                     else if(nodes.Count > 0)
                         SetString(xml, scalar.Path, value);
 
-                } else if(fromFile && single != null && IsPlainValue(single) && single.InnerText == fallback)
+                } else if(removeDefaults && single != null && IsPlainValue(single) && single.InnerText == fallback)
 
                     // Unchanged, and the file holds the default
                     RemoveScalar(single);
