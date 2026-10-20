@@ -401,17 +401,23 @@ namespace OmenMon.Hardware.Platform {
             return Hotter(GetFreshReading("CPUT", now), GetFreshReading("BIOS", now));
         }
 
-        // GPU temperature for control decisions, or SensorReading.None when GPTM has no
-        // fresh valid reading — which is also what a parked (powered-off) GPU gives
-        public SensorReading GetGpuReading(bool forceUpdate = false) {
+        // GPU temperature history for control decisions: the GPTM sensor's last valid
+        // reading and last successful 0, so that GpuReading.StateAt() can tell a fresh
+        // reading, a parked GPU and an unknown one apart. GpuReading.None without GPTM.
+        public GpuReading GetGpuReading(bool forceUpdate = false) {
             if(forceUpdate)
                 UpdateTemperature(false);
-            return GetFreshReading("GPTM", PlatformClock.UtcNow);
+            for(int i = 0; i < this.Temperature.Length; i++)
+                if(this.Temperature[i].GetName() == "GPTM")
+                    return new GpuReading(this.Temperature[i].GetReading(), this.Temperature[i].GetZeroReadAt());
+            return GpuReading.None;
         }
 
         // Hottest fresh reading among the CPU sensors, the GPU sensor and every sensor
         // used for the maximum temperature. SensorReading.None if the CPU itself has no
-        // fresh reading: without it the system state is unknown, whatever else reads.
+        // fresh reading, or if the GPU has read before and its state is now unknown
+        // (failed reads, not a parked GPU): without them the system state is unknown,
+        // whatever else reads.
         public SensorReading GetHottestReading(bool forceUpdate = false) {
             if(forceUpdate)
                 UpdateTemperature(false);
@@ -419,7 +425,15 @@ namespace OmenMon.Hardware.Platform {
             SensorReading cpu = GetCpuReading(false);
             if(!cpu.HasValue)
                 return SensorReading.None;
-            SensorReading hottest = Hotter(cpu, GetFreshReading("GPTM", now));
+            SensorReading hottest = cpu;
+            GpuReading gpu = GetGpuReading(false);
+            switch(gpu.StateAt(now, ReadingMaxAge)) {
+                case GpuState.Unknown:
+                    return SensorReading.None;
+                case GpuState.Fresh:
+                    hottest = Hotter(hottest, gpu.Last);
+                    break;
+            }
             for(int i = 0; i < this.Temperature.Length; i++) {
                 if(!this.TemperatureUse[i])
                     continue;

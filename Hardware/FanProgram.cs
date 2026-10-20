@@ -240,10 +240,12 @@ namespace OmenMon.Hardware.Platform {
             // implausible read is "no reading", never 0 °C. GetCpuReading(true)
             // updates all sensors once; GetGpuReading() reuses that pass.
             SensorReading cpu = Platform.GetCpuReading(true);
-            SensorReading gpu = Platform.GetGpuReading(false);
+            GpuReading gpuHistory = Platform.GetGpuReading(false);
+            GpuState gpuState = gpuHistory.StateAt(PlatformClock.UtcNow, Platform.ReadingMaxAge);
+            SensorReading gpu = gpuState == GpuState.Fresh ? gpuHistory.Last : SensorReading.None;
 
             // Pick the levels (see SelectLevels for the unknown-temperature rules)
-            byte[] fans = SelectLevels(cpu, gpu, out bool safeLevel);
+            byte[] fans = SelectLevels(cpu, gpuState, gpu.Value, out bool safeLevel);
 
             // Keep GetMaxTemperature populated for the tray icon
             // (sensors are already up-to-date, no extra EC reads)
@@ -285,22 +287,37 @@ namespace OmenMon.Hardware.Platform {
         //     fans get the program's highest row. Unknown is treated as hot, never as
         //     cold — previously a failed read was 0 °C and selected the lowest row
         //     (possibly 0/0, fans off) and re-sent it every program tick.
-        //   * No fresh GPU reading (parked dGPU reads 0, a board without a GPU sensor, a
-        //     failed read): the GPU fan follows the CPU temperature. This replaces the
-        //     issue #66 rule that left the GPU fan on the 0 °C row whenever the GPU had
-        //     once been seen and then read 0 — on boards whose fans share heat pipes that
-        //     idled the GPU fan under full CPU load.
-        internal byte[] SelectLevels(SensorReading cpu, SensorReading gpu, out bool safeLevel) {
+        //   * GPU state unknown (it has read before, and now its reads fail or are
+        //     implausible for longer than Platform.ReadingMaxAge, with no 0 read either):
+        //     the GPU fan gets the program's highest row, and so does the CPU fan when
+        //     the fans share the temperature. Before, a failed GPU read was taken for a
+        //     parked GPU, and the GPU fan followed the CPU while the GPU was hot.
+        //   * GPU parked (reads 0) or never observed (a board without a GPU sensor):
+        //     the GPU fan follows the CPU temperature. This replaces the issue #66 rule
+        //     that left the GPU fan on the 0 °C row whenever the GPU had once been seen
+        //     and then read 0 — on boards whose fans share heat pipes that idled the GPU
+        //     fan under full CPU load.
+        // gpuValue counts only when gpuState is Fresh.
+        internal byte[] SelectLevels(SensorReading cpu, GpuState gpuState, int gpuValue, out bool safeLevel) {
+
+            byte[] top = GetFanLevel(this.Levels[this.Levels.Count - 1]);
 
             if(!cpu.HasValue) {
                 safeLevel = true;
-                byte[] top = GetFanLevel(this.Levels[this.Levels.Count - 1]);
                 return new byte[] { top[0], top[1] };
             }
 
-            safeLevel = false;
             byte cpuTemp = ClampTemperature(cpu.Value);
-            byte gpuTemp = gpu.HasValue ? ClampTemperature(gpu.Value) : cpuTemp;
+
+            if(gpuState == GpuState.Unknown) {
+                safeLevel = true;
+                if(Config.FanProgramSharedTemperature)
+                    return new byte[] { top[0], top[1] };
+                return new byte[] { GetFanLevel(GetTemperatureLevel(cpuTemp))[0], top[1] };
+            }
+
+            safeLevel = false;
+            byte gpuTemp = gpuState == GpuState.Fresh ? ClampTemperature(gpuValue) : cpuTemp;
 
             // Both fans follow the hotter chip when configured to share it
             // (common heat pipes, e.g. 8BAC); otherwise each fan follows its own

@@ -144,6 +144,79 @@ namespace OmenMon.Tests {
             Assert.Equal(new byte[] { 55, 55 }, rig.Bios.LevelWrites[^1]);
         }
 
+        // fansafety-0: the EC lock times out for longer than the reading age limit while
+        // the BIOS CPU sensor (WMI 0x23) keeps reading. The GPU has read before, so its
+        // temperature is unknown, not parked.
+        [Fact]
+        public void Program_GpuReadsFail_GpuFanGetsTheTopRow() {
+            var rig = new TestRig();
+            rig.SetCpuTemperature(55);
+            rig.Ec.GpuTemperature = 72;
+            var program = StartProgram(rig);
+            Assert.Equal(new byte[] { 30, 45 }, rig.Bios.LevelWrites[^1]);
+
+            rig.Ec.LockFails = true;
+            rig.Advance(30);
+            program.Update();
+            Assert.Equal(new byte[] { 30, 45 }, rig.Bios.LevelWrites[^1]); // still fresh
+
+            rig.Advance(16);
+            program.Update();
+            Assert.Equal(new byte[] { 30, 55 }, rig.Bios.LevelWrites[^1]);
+
+            // The EC reads again: back to the GPU's own row
+            rig.Ec.LockFails = false;
+            rig.Advance(15);
+            program.Update();
+            Assert.Equal(new byte[] { 30, 45 }, rig.Bios.LevelWrites[^1]);
+        }
+
+        [Fact]
+        public void HottestReading_IsNone_WhenGpuReadsFail_NotWhenParked() {
+            var rig = new TestRig();
+            rig.SetCpuTemperature(55);
+            rig.Ec.GpuTemperature = 92;
+            Assert.Equal(92, rig.Platform.GetHottestReading(true).Value);
+
+            rig.Ec.LockFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            Assert.False(rig.Platform.GetHottestReading(true).HasValue);
+
+            // Parked instead: GPTM reads 0 successfully
+            rig.Ec.LockFails = false;
+            rig.Ec.GpuTemperature = 0;
+            Assert.Equal(55, rig.Platform.GetHottestReading(true).Value);
+        }
+
+        [Fact]
+        public void FanOff_IsRaised_WhenGpuReadsFail() {
+            var rig = new TestRig();
+            rig.SetCpuTemperature(40);
+            rig.Ec.GpuTemperature = 45;
+            rig.Platform.GetCpuReading(true);
+            rig.Fans.SetOff(true);
+            Assert.Equal(new byte[] { 0, 0 }, rig.Bios.LevelWrites[^1]);
+
+            rig.Ec.LockFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            rig.Platform.GetCpuReading(true);
+            Assert.True(rig.Platform.GetCpuReading(false).HasValue); // the BIOS sensor reads
+            Assert.True(rig.Fans.Supervise());
+            Assert.Equal(new byte[] { 20, 22 }, rig.Bios.LevelWrites[^1]);
+        }
+
+        // A board whose GPU sensor never reads (or a GPU parked since start) is judged on
+        // the CPU alone, as before, also while the EC lock fails
+        [Fact]
+        public void GpuNeverObserved_KeepsTheCpuJudgement() {
+            var rig = new TestRig();
+            rig.SetCpuTemperature(40);
+            rig.Ec.LockFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            Assert.Equal(40, rig.Platform.GetHottestReading(true).Value);
+            Assert.True(rig.Fans.Guard.IsCool());
+        }
+
     }
 
 }
