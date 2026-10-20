@@ -47,4 +47,46 @@ namespace OmenMon.Hardware.Platform {
 
     }
 
+    // What a thermal-panic check changed
+    public enum ThermalPanicTransition {
+        None,       // no change
+        Entered,    // panic starts: raise the fans
+        Cleared,    // the temperature came down: restore fan control
+        Disabled    // the feature was turned off while panic was active: restore quietly
+    }
+
+    // The thermal-panic state and its transitions, without the I/O: the GUI feeds it the
+    // hottest reading on every supervised pass and does what the transition says (fans,
+    // balloon). Written by the monitor thread, read by others (tray tooltip, menu).
+    public sealed class ThermalPanicState {
+
+        private volatile bool active;
+
+        public bool IsActive { get { return this.active; } }
+
+        // Applies one reading (see ThermalPanicPolicy.Next for the rules)
+        public ThermalPanicTransition Update(bool enabled, SensorReading hottest, bool complete, byte threshold, byte hysteresis) {
+
+            if(!enabled)
+                return Clear() ? ThermalPanicTransition.Disabled : ThermalPanicTransition.None;
+
+            bool next = ThermalPanicPolicy.Next(this.active, hottest, complete, threshold, hysteresis);
+            if(next == this.active)
+                return ThermalPanicTransition.None;
+
+            this.active = next;
+            return next ? ThermalPanicTransition.Entered : ThermalPanicTransition.Cleared;
+
+        }
+
+        // Leaves panic without a reading; true if it was active
+        public bool Clear() {
+            if(!this.active)
+                return false;
+            this.active = false;
+            return true;
+        }
+
+    }
+
 }

@@ -28,6 +28,43 @@ namespace OmenMon.Tests {
             Assert.True(ThermalPanicPolicy.Next(false, R(104), 90, 5));
         }
 
+        [Fact]
+        public void State_EntersClearsAndReportsEachTransitionOnce() {
+            var s = new ThermalPanicState();
+            Assert.Equal(ThermalPanicTransition.None, s.Update(true, R(94), true, 95, 10));
+            Assert.Equal(ThermalPanicTransition.Entered, s.Update(true, R(95), true, 95, 10));
+            Assert.True(s.IsActive);
+            Assert.Equal(ThermalPanicTransition.None, s.Update(true, R(97), true, 95, 10));
+            Assert.Equal(ThermalPanicTransition.None, s.Update(true, R(86), true, 95, 10));
+            Assert.Equal(ThermalPanicTransition.Cleared, s.Update(true, R(85), true, 95, 10));
+            Assert.False(s.IsActive);
+            Assert.Equal(ThermalPanicTransition.None, s.Update(true, R(85), true, 95, 10));
+        }
+
+        [Fact]
+        public void State_MissingOrIncompleteReading_NeverClears() {
+            var s = new ThermalPanicState();
+            Assert.Equal(ThermalPanicTransition.Entered, s.Update(true, R(96), false, 95, 10));
+            Assert.Equal(ThermalPanicTransition.None, s.Update(true, SensorReading.None, true, 95, 10));
+            Assert.Equal(ThermalPanicTransition.None, s.Update(true, R(40), false, 95, 10));
+            Assert.True(s.IsActive);
+            Assert.Equal(ThermalPanicTransition.Cleared, s.Update(true, R(40), true, 95, 10));
+        }
+
+        [Fact]
+        public void State_DisabledWhileActive_ClearsQuietly() {
+            var s = new ThermalPanicState();
+            Assert.Equal(ThermalPanicTransition.None, s.Update(false, R(99), true, 95, 10));
+            Assert.False(s.IsActive);
+            s.Update(true, R(99), true, 95, 10);
+            Assert.Equal(ThermalPanicTransition.Disabled, s.Update(false, R(99), true, 95, 10));
+            Assert.False(s.IsActive);
+            Assert.Equal(ThermalPanicTransition.None, s.Update(false, R(99), true, 95, 10));
+            s.Update(true, R(99), true, 95, 10);
+            Assert.True(s.Clear());
+            Assert.False(s.Clear());
+        }
+
         // An incomplete reading (the GPU's state is unknown) is a lower bound: it may
         // start panic, it never ends it
         [Fact]
