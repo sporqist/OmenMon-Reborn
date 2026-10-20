@@ -105,6 +105,12 @@ namespace OmenMon.AppGui {
             // Initialize the fan program
             this.Program = new FanProgram(this.Platform, FanProgramCallback);
 
+            // Read the fan table (0x2F, read only) now, so the thermal-panic level is
+            // known before the first panic instead of being read under load; if the read
+            // fails, panic falls back to a safe level and reads it again. No other thread
+            // touches the hardware yet.
+            this.Platform.Fans.GetPanicLevel();
+
             // Last-chance hand-back of fan control to the BIOS on process exit or a fatal
             // crash (App.OnExit, Crash). Takes the hardware lock if it can get it within
             // 2 s; a crashed thread may still hold it, and handing back matters more.
