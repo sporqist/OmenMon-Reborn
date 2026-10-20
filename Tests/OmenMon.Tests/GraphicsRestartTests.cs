@@ -301,7 +301,7 @@ namespace OmenMon.Tests {
             AddChrome();
             ProcessSnapshot s = this.catalog.Snapshot();
             s.InteractiveSession = -1;
-            Assert.Equal(RestartBlock.OtherUser, Assert.Single(RestartPlanner.Plan(new[] { Chrome }, s)).Block);
+            Assert.Equal(RestartBlock.NoShell, Assert.Single(RestartPlanner.Plan(new[] { Chrome }, s)).Block);
         }
 
         [Fact]

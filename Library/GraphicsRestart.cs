@@ -64,6 +64,7 @@ namespace OmenMon.Library {
         None,               // it can
         Explorer,           // explorer.exe: takes effect at the next sign-in
         Self,               // OmenMon itself: takes effect at its next start
+        NoShell,            // the shell (Explorer) is not running: nothing can be started unelevated
         OtherUser,          // another user, a service or another session (or not readable)
         Elevated,           // runs elevated: it would come back unelevated, so it is left alone
         ElevationUnknown,   // whether it runs elevated could not be read
@@ -327,7 +328,9 @@ namespace OmenMon.Library {
                 return RestartBlock.Explorer;
             if(group.Any(p => p.Pid == snapshot.OwnPid))
                 return RestartBlock.Self;
-            if(group.Any(p => p.InteractiveUser != true || snapshot.InteractiveSession < 0 || p.SessionId != snapshot.InteractiveSession))
+            if(snapshot.InteractiveSession < 0)
+                return RestartBlock.NoShell;
+            if(group.Any(p => p.InteractiveUser != true || p.SessionId != snapshot.InteractiveSession))
                 return RestartBlock.OtherUser;
             if(group.Any(p => p.Elevated == true))
                 return RestartBlock.Elevated;
@@ -606,6 +609,7 @@ namespace OmenMon.Library {
                 case RestartBlock.None: return "can be restarted";
                 case RestartBlock.Explorer: return "takes effect at the next sign-in";
                 case RestartBlock.Self: return "OmenMon itself: takes effect at its next start";
+                case RestartBlock.NoShell: return "the Windows shell (Explorer) is not running";
                 case RestartBlock.OtherUser: return "runs as another user, as a service or in another session";
                 case RestartBlock.Elevated: return "runs as administrator: not restarted";
                 case RestartBlock.ElevationUnknown: return "could not check whether it runs as administrator";
