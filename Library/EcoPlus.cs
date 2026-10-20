@@ -342,12 +342,21 @@ namespace OmenMon.Library {
             if(!this.state.Reload())
                 return null;
             NewPeriod();
+            bool boostChanged = false;
             foreach(KeyValuePair<Guid, uint> saved in this.state.SavedBoostDc.ToList()) {
-                this.plan.WriteBoostDc(saved.Key, saved.Value);
+                // Only while the scheme still has the value Eco+ wrote (it may have been
+                // changed with powercfg, or the scheme deleted, while Eco+ was off)
+                uint? current = this.plan.ReadBoostDc(saved.Key);
+                if(current == BoostDisabled) {
+                    this.plan.WriteBoostDc(saved.Key, saved.Value);
+                    done.Add("boost on battery back to " + saved.Value);
+                } else
+                    done.Add("boost on battery left at " + WindowsPowerPlan.BoostModeName(current) + ", not put back to " + saved.Value
+                        + (current.HasValue ? " (changed since Eco+ set it)" : " (scheme gone)"));
                 this.state.SavedBoostDc.Remove(saved.Key);
-                done.Add("boost on battery back to " + saved.Value);
+                boostChanged = true;
             }
-            if(done.Count > 0)
+            if(boostChanged)
                 SaveRestored();
             if(this.state.RefreshBefore.HasValue)
                 RestoreRefresh(done);
@@ -355,7 +364,7 @@ namespace OmenMon.Library {
         }
 
         // Sets the given apps (exe path or packaged-app AUMID) to "power saving", keeping
-        // each app's original value the first time; returns how many were changed
+        // each app's original value; returns how many were changed
         public int ReleaseGpu(IEnumerable<string> apps) {
             lock(this.sync) {
                 this.LastError = null;
@@ -369,13 +378,17 @@ namespace OmenMon.Library {
                     if(current == GpuPowerSaving)
                         continue;
                     // Each original is on disk before its app is changed; on a failed save
-                    // this app and the rest are left as they are
-                    if(!this.state.SavedGpu.ContainsKey(app)) {
-                        this.state.SavedGpu[app] = current;   // null = had no preference
-                        if(!Save("the GPU preference of " + app)) {
+                    // this app and the rest are left as they are. An app not at "power
+                    // saving" was changed since any earlier release, so its value now is
+                    // the one to restore.
+                    bool had = this.state.SavedGpu.TryGetValue(app, out string earlier);
+                    this.state.SavedGpu[app] = current;   // null = had no preference
+                    if(!Save("the GPU preference of " + app)) {
+                        if(had)
+                            this.state.SavedGpu[app] = earlier;
+                        else
                             this.state.SavedGpu.Remove(app);
-                            break;
-                        }
+                        break;
                     }
                     this.gpu.Set(app, GpuPowerSaving);
                     changed++;
@@ -386,19 +399,39 @@ namespace OmenMon.Library {
 
         // Puts every GPU preference Eco+ changed back as it was; returns how many
         public int RestoreGpu() {
+            return RestoreGpu(out int skipped);
+        }
+
+        // The same; skipped counts the apps whose preference was changed since Eco+ set
+        // "power saving" (left as they are, logged, and no longer kept)
+        public int RestoreGpu(out int skipped) {
             lock(this.sync) {
                 int restored = 0;
+                skipped = 0;
+                this.LastError = null;
                 if(!this.state.Reload())
                     return 0;
                 foreach(KeyValuePair<string, string> saved in this.state.SavedGpu.ToList()) {
-                    if(saved.Value == null)
-                        this.gpu.Remove(saved.Key);
-                    else
-                        this.gpu.Set(saved.Key, saved.Value);
-                    this.state.SavedGpu.Remove(saved.Key);
-                    restored++;
+                    try {
+                        string current = this.gpu.Get(saved.Key);
+                        if(current != GpuPowerSaving) {
+                            Log("GPU preference of " + saved.Key + " left at " + RegistryGpuPreferences.Describe(current) + ": changed since Eco+ set power saving");
+                            skipped++;
+                        } else {
+                            if(saved.Value == null)
+                                this.gpu.Remove(saved.Key);
+                            else
+                                this.gpu.Set(saved.Key, saved.Value);
+                            restored++;
+                        }
+                        this.state.SavedGpu.Remove(saved.Key);
+                    } catch(Exception e) {
+                        // Kept, for the next restore
+                        this.LastError = "could not restore the GPU preference of " + saved.Key + ": " + e.Message;
+                        Log(this.LastError);
+                    }
                 }
-                if(restored > 0)
+                if(restored + skipped > 0)
                     SaveRestored();
                 return restored;
             }

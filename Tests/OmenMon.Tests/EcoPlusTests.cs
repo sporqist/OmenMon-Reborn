@@ -421,6 +421,42 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Gpu_ChangedSince_IsNotRestored() {
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";
+            var eco = NewEco();
+            eco.ReleaseGpu(new[] { "a.exe", "b.exe" });
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";   // set back in Windows Settings
+            Assert.Equal(1, eco.RestoreGpu(out int skipped));
+            Assert.Equal(1, skipped);
+            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
+            Assert.Null(this.gpu.Get("b.exe"));
+            Assert.Empty(eco.State.SavedGpu);
+            Assert.Contains("a.exe left at high performance", LogText);
+        }
+
+        [Fact]
+        public void Gpu_ReleasedAgainAfterAChange_KeepsTheNewerValue() {
+            this.gpu.Values["a.exe"] = "GpuPreference=0;";
+            var eco = NewEco();
+            eco.ReleaseGpu(new[] { "a.exe" });
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";   // the user's choice since
+            eco.ReleaseGpu(new[] { "a.exe" });
+            eco.RestoreGpu();
+            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
+        }
+
+        [Fact]
+        public void Boost_ChangedSince_IsNotRestored() {
+            var eco = NewEco();
+            eco.Maintain(true);
+            this.plan.Dc[Balanced] = 3;          // powercfg while Eco+ was on
+            string done = eco.RestoreSettings();
+            Assert.Equal(3u, this.plan.Dc[Balanced]);
+            Assert.Contains("left at efficient enabled", done);
+            Assert.True(eco.State.IsEmpty);
+        }
+
+        [Fact]
         public void Gpu_AlreadyPowerSaving_IsSkipped() {
             this.gpu.Values["a.exe"] = EcoPlus.GpuPowerSaving;
             Assert.Equal(0, NewEco().ReleaseGpu(new[] { "a.exe" }));

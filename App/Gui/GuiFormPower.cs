@@ -179,9 +179,11 @@ namespace OmenMon.AppGui {
         }
 
         private void EventRestore() {
-            int n = 0;
-            try { n = this.Eco?.RestoreGpu() ?? 0; } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
-            LblGpuNote.Text = n + " preference(s) restored. Apps pick them up when they restart.";
+            int n = 0, skipped = 0;
+            try { if(this.Eco != null) n = this.Eco.RestoreGpu(out skipped); } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
+            LblGpuNote.Text = n + " preference(s) restored"
+                + (skipped > 0 ? ", " + skipped + " changed since and left as they are" : "")
+                + (this.Eco?.LastError != null ? "; " + this.Eco.LastError : ". Apps pick them up when they restart.");
             this.Listed.Clear();
             UpdateRestoreButton();
         }
