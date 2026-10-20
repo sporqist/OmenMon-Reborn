@@ -312,13 +312,20 @@ namespace OmenMon.Tests {
                 Path.Combine("Hardware", "FanArray.cs"),
                 Path.Combine("App", "Cli", "CliOp.cs"),
                 Path.Combine("App", "Cli", "CliOpBios.cs") };
-            var offenders = Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories)
+            // Only the application's own source folders: the checkout may also hold
+            // local copies and agent worktrees (.local, .claude) with other versions
+            var offenders = new[] { "App", "Driver", "External", "Hardware", "Library" }
+                .Select(d => Path.Combine(root, d))
+                .Where(Directory.Exists)
+                .SelectMany(d => Directory.GetFiles(d, "*.cs", SearchOption.AllDirectories))
+                .Concat(Directory.GetFiles(root, "*.cs", SearchOption.TopDirectoryOnly))
                 .Select(f => Path.GetRelativePath(root, f))
-                .Where(f => !f.StartsWith("Tests") && !f.StartsWith("obj") && !f.StartsWith("Bin"))
+                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
                 .Where(f => Regex.IsMatch(File.ReadAllText(Path.Combine(root, f)), @"\.SetFanLevel\b"))
                 .Where(f => !allowed.Contains(f))
                 .ToList();
             Assert.Empty(offenders);
+            Assert.Matches(@"\.SetFanLevel\b", File.ReadAllText(Path.Combine(root, "Hardware", "FanArray.cs")));
             Assert.Contains("CliFanSafetyGuard().Filter",
                 File.ReadAllText(Path.Combine(root, "App", "Cli", "CliOpBios.cs")));
         }
