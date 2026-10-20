@@ -119,7 +119,11 @@ namespace OmenMon.AppGui {
         }
 
         private void EventClosing(object sender, FormClosingEventArgs e) {
-            if(this.Running) {
+            // Only the user's own close waits for the run: a cancel here would also stop
+            // OmenMon's exit (tray Exit, which then never hands the fans back) and the
+            // Windows shutdown. The worker then answers any open question "leave it
+            // running" (its Invoke fails) and ends nothing.
+            if(this.Running && e.CloseReason == CloseReason.UserClosing) {
                 e.Cancel = true;
                 LblProgress.Text = "Restarting: this window closes once it is done (up to 15 s per app to close).";
                 return;
