@@ -676,6 +676,24 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_EntryEditedByHandAfterASave_IsNotReverted() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+
+            // Changed in the application and saved: what the file now holds is the new baseline
+            Config.FanProgram["Beta"].Level[0] = new byte[] { 33, 33 };
+            SaveAndRead();
+
+            // Then Beta is edited by hand while the application runs, and an unrelated setting changes
+            EditFile("FanPrograms/Program[@Name='Beta']/Level[@Temperature='00']/Cpu", "36");
+            EditFile("FanPrograms/Program[@Name='Beta']/Level[@Temperature='00']/Gpu", "38");
+            Config.GuiStayOnTop = !Config.GuiStayOnTop;
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("36", Program(xml, "Beta")!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+            Assert.Equal("38", Program(xml, "Beta")!.SelectSingleNode("Level[@Temperature='00']/Gpu")!.InnerText);
+        }
+
+        [Fact]
         public void Save_DefaultEntries_AreNotWritten_UntilTheCollectionChanges() {
             File.WriteAllText(File_, Fixture);
             Config.Load();
