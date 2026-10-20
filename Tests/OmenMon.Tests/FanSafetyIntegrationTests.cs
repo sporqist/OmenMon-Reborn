@@ -189,7 +189,7 @@ namespace OmenMon.Tests {
             Sample(rig);
             rig.Fans.SetPanic(true);
             byte[] panic = rig.Fans.GetPanicLevel();
-            Assert.Equal(new byte[] { 55, 55 }, panic); // table max 52/55, at least FanLevelMax 55
+            Assert.Equal(new byte[] { 52, 55 }, panic); // the table maximum
             Assert.Equal(panic, rig.Bios.MeasuredLevels); // armed itself, no heartbeat needed
 
             // Re-sent on every supervised pass
@@ -217,7 +217,7 @@ namespace OmenMon.Tests {
             rig.Fans.SetPanic(true);
             rig.Advance(15);
             program.Update();
-            Assert.Equal(new byte[] { 55, 55 }, rig.Bios.LevelWrites[^1]);
+            Assert.Equal(new byte[] { 52, 55 }, rig.Bios.LevelWrites[^1]);
 
             rig.Fans.SetPanic(false);
             Assert.Equal(new byte[] { 35, 35 }, rig.Bios.LevelWrites[^1]);
@@ -233,6 +233,70 @@ namespace OmenMon.Tests {
             } finally {
                 Config.FanLevelMax = saved;
             }
+        }
+
+        // fansafety-1: the table is what the firmware runs at its top; FanLevelMax (up
+        // to 100) must not push panic above it
+        [Fact]
+        public void FanLevelMax_DoesNotPushPanicAboveTheTable() {
+            var rig = new TestRig();
+            int saved = Config.FanLevelMax;
+            try {
+                Config.FanLevelMax = 100;
+                Assert.Equal(new byte[] { 52, 55 }, rig.Fans.GetPanicLevel());
+            } finally {
+                Config.FanLevelMax = saved;
+            }
+        }
+
+        // fansafety-1: a failed 0x2F read gives the fallback (at least the warm curve's
+        // top step) and is not cached; the next panic reads the table again
+        [Fact]
+        public void FailedFanTableRead_FallsBackSafely_AndIsRetried() {
+            var rig = new TestRig();
+            rig.Platform.SafetyPolicy.WarmCurve = FanSafetyPolicy.DefaultWarmCurve();
+            rig.SetCpuTemperature(97);
+            Sample(rig);
+
+            rig.Bios.FailTypes.Add(0x2F);
+            Assert.Equal(new byte[] { 60, 63 }, rig.Fans.GetPanicLevel());
+            int reads = rig.Bios.Count(0x2F);
+            rig.Fans.SetPanic(true);
+            Assert.Equal(reads + 1, rig.Bios.Count(0x2F)); // not cached: read again
+            Assert.Equal(new byte[] { 60, 63 }, rig.Bios.MeasuredLevels);
+            rig.Fans.SetPanic(false);
+
+            // A program row in panic gets the fallback too (program writes do not get
+            // the warm curve, so this is the level that counts for them)
+            Assert.Equal(new byte[] { 60, 63 }, ProgramRowInPanic(rig));
+
+            rig.Bios.FailTypes.Remove(0x2F);
+            Assert.Equal(new byte[] { 52, 55 }, rig.Fans.GetPanicLevel());
+
+            // Cached once read: a later failure does not matter
+            rig.Bios.FailTypes.Add(0x2F);
+            reads = rig.Bios.Count(0x2F);
+            Assert.Equal(new byte[] { 52, 55 }, rig.Fans.GetPanicLevel());
+            rig.Fans.SetPanic(true);
+            Assert.Equal(reads, rig.Bios.Count(0x2F));
+        }
+
+        // What a program row of 30/30 is raised to while in panic with the panic level
+        // GetPanicLevel() gives now
+        private static byte[] ProgramRowInPanic(TestRig rig) {
+            rig.Fans.Guard.SetPanic(rig.Fans.GetPanicLevel());
+            try {
+                return rig.Fans.Guard.Filter(new byte[] { 30, 30 }, FanLevelSource.Program);
+            } finally {
+                rig.Fans.Guard.SetPanic(null);
+            }
+        }
+
+        [Fact]
+        public void FailedFanTableRead_WithoutWarmCurve_FallsBackToFanLevelMax() {
+            var rig = new TestRig(); // warm curve "none": only the floor
+            rig.Bios.FailAll = true;
+            Assert.Equal(new byte[] { 55, 55 }, rig.Fans.GetPanicLevel());
         }
 
         // Source tripwire: the only places that issue the raw 0x2E fan-level call are

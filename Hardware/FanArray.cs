@@ -42,6 +42,10 @@ namespace OmenMon.Hardware.Platform {
         // Enters or leaves level-based thermal panic (fan-table maximum)
         public void SetPanic(bool flag);
 
+        // The thermal-panic level (fan-table maximum, or a safe fallback while the
+        // table cannot be read); calling it early reads the table before it is needed
+        public byte[] GetPanicLevel();
+
         // Whether the 0x10 heartbeat may run (false shortly after a hand-back)
         public bool HeartbeatAllowed { get; }
 
@@ -103,7 +107,7 @@ namespace OmenMon.Hardware.Platform {
         // Fan-safety guard (set by Platform)
         public FanSafetyGuard Guard { get; set; }
 
-        // Panic level cache (fan-table maximum, read once)
+        // Panic level cache (fan-table maximum, kept once read successfully)
         private byte[] panicLevel;
 
         // When the 0x2E fan-level call was last armed with a 0x10 query by this class
@@ -258,24 +262,41 @@ namespace OmenMon.Hardware.Platform {
             get { return this.Guard != null && this.Guard.NeedsSupervision; }
         }
 
-        // The thermal-panic level: the highest level per fan in the BIOS fan table
-        // (0x2F), but at least Config.FanLevelMax; Config.FanLevelMax if the table
-        // cannot be read or makes no sense. Read once.
+        // The thermal-panic level: the highest level per fan in the BIOS fan table (0x2F),
+        // which is what the firmware itself runs at the top of its curve (8BAC: 60/63).
+        // Cached only once the table has been read and has a sane row (1-100) for each
+        // fan. Otherwise, for a fan without one, the fallback: Config.FanLevelMax, but at
+        // least the warm safety curve's top step (60/63 by default), the level the guard
+        // gives an unknown temperature. Not cached, so the next panic reads the table
+        // again: a single failed read must not hold the panic level down for the life of
+        // the process.
         public byte[] GetPanicLevel() {
+
             if(this.panicLevel != null)
-                return this.panicLevel;
-            byte max = (byte) Math.Max(1, Math.Min(100, Config.FanLevelMax));
-            byte[] level = new byte[] { max, max };
+                return new byte[] { this.panicLevel[0], this.panicLevel[1] };
+
+            byte[] table = new byte[2];
             try {
-                BiosData.FanTable table = this.Bios.GetFanTable();
-                if(table.Level != null)
-                    foreach(BiosData.FanLevel row in table.Level) {
-                        if(row.Fan1Level <= 100 && row.Fan1Level > level[0]) level[0] = row.Fan1Level;
-                        if(row.Fan2Level <= 100 && row.Fan2Level > level[1]) level[1] = row.Fan2Level;
+                BiosData.FanTable data = this.Bios.GetFanTable();
+                if(data.Level != null)
+                    foreach(BiosData.FanLevel row in data.Level) {
+                        if(row.Fan1Level <= 100 && row.Fan1Level > table[0]) table[0] = row.Fan1Level;
+                        if(row.Fan2Level <= 100 && row.Fan2Level > table[1]) table[1] = row.Fan2Level;
                     }
             } catch { }
-            this.panicLevel = level;
+
+            if(table[0] > 0 && table[1] > 0) {
+                this.panicLevel = table;
+                return new byte[] { table[0], table[1] };
+            }
+
+            FanSafetyPolicy policy = this.Guard != null ? this.Guard.Policy : new FanSafetyPolicy();
+            byte max = (byte) Math.Max(1, Math.Min(100, Config.FanLevelMax));
+            byte[] level = new byte[2];
+            for(int i = 0; i < 2; i++)
+                level[i] = table[i] > 0 ? table[i] : Math.Max(max, policy.ManualMinimum(i, null));
             return level;
+
         }
 
         // On boards like 8BAC a 0x2E fan-level call only takes effect within ~30 s after

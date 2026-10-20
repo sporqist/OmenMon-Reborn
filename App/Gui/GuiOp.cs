@@ -81,10 +81,10 @@ namespace OmenMon.AppGui {
         public bool FullPower { get { return this._fullPower; } private set { this._fullPower = value; } }
 
         // Thermal panic: true while max temperature is above the configured threshold.
-        // Volatile: written by the monitor thread (CheckThermalPanic) and read by the UI
-        // thread (tray tooltip / snapshot) and elsewhere.
-        private volatile bool _isThermalPanic;
-        public bool IsThermalPanic { get { return this._isThermalPanic; } private set { this._isThermalPanic = value; } }
+        // Changed by the monitor thread (CheckThermalPanic) and read by the UI thread
+        // (tray tooltip / snapshot) and elsewhere; ThermalPanicState publishes it.
+        private readonly ThermalPanicState thermalPanic = new ThermalPanicState();
+        public bool IsThermalPanic { get { return this.thermalPanic.IsActive; } }
 
         // Constructs the operation-running class
         public GuiOp(GuiTray context) {
@@ -105,18 +105,17 @@ namespace OmenMon.AppGui {
             // Initialize the fan program
             this.Program = new FanProgram(this.Platform, FanProgramCallback);
 
+            // Read the fan table (0x2F, read only) now, so the thermal-panic level is
+            // known before the first panic instead of being read under load; if the read
+            // fails, panic falls back to a safe level and reads it again. No other thread
+            // touches the hardware yet.
+            this.Platform.Fans.GetPanicLevel();
+
             // Last-chance hand-back of fan control to the BIOS on process exit or a fatal
             // crash (App.OnExit, Crash). Takes the hardware lock if it can get it within
-            // 2 s; a crashed thread may still hold it, and handing back matters more.
-            FanHandBack.Register(() => {
-                bool locked = Monitor.TryEnter(this.HardwareLock, 2000);
-                try {
-                    this.Platform.Fans.ReleaseIfHeld();
-                } finally {
-                    if(locked)
-                        Monitor.Exit(this.HardwareLock);
-                }
-            });
+            // a part of the time Run() is given (FanHandBack.LockWaitMs); a crashed thread
+            // may still hold it, and handing back matters more.
+            FanHandBack.Register(() => this.Platform.Fans.ReleaseIfHeld(), this.HardwareLock);
 
             // Set the full power flag using the multi-source check so a boot that
             // happens to land mid-flicker (issue #70) does not load the alternate
@@ -371,57 +370,51 @@ namespace OmenMon.AppGui {
         // Used when the dynamic icon is disabled while panic is active — no balloon tip is shown
         // because the trigger was a config change, not a temperature drop.
         public void ClearThermalPanic() {
-            if(IsThermalPanic) {
-                IsThermalPanic = false;
+            if(this.thermalPanic.Clear())
                 Platform.Fans.SetPanic(false);
-            }
         }
 
         // Checks temperature and activates or deactivates Thermal Panic Mode.
         // Takes the hottest validated reading: a missing reading (failed, implausible or
-        // stale sensor reads) neither triggers nor clears panic.
-        public void CheckThermalPanic(SensorReading hottest) {
+        // stale sensor reads) neither triggers nor clears panic, and an incomplete one
+        // (complete = false: the GPU's state is unknown) may trigger it but never clears it.
+        public void CheckThermalPanic(SensorReading hottest, bool complete = true) {
 
-            // If panic is currently active but the feature has been disabled (e.g. user toggled
-            // it off at runtime or the dynamic icon was turned off), clear the stuck state so
-            // fans are not left at max indefinitely.
-            if(!Config.ThermalPanicEnabled) {
-                if(IsThermalPanic) {
-                    IsThermalPanic = false;
-                    Platform.Fans.SetPanic(false);
-                }
-                return;
-            }
-
-            bool panic = ThermalPanicPolicy.Next(IsThermalPanic, hottest,
+            // The state and its rules are in ThermalPanicState; this does the I/O. If the
+            // feature has been disabled while panic is active (e.g. user toggled it off at
+            // runtime or the dynamic icon was turned off), the state is cleared so fans
+            // are not left at max indefinitely.
+            ThermalPanicTransition transition = this.thermalPanic.Update(
+                Config.ThermalPanicEnabled, hottest, complete,
                 Config.ThermalPanicTemperature, Config.ThermalPanicHysteresis);
             int maxTemp = hottest.Value;
 
-            if(!IsThermalPanic && panic) {
+            switch(transition) {
 
-                // Level-based: every fan write is raised to the fan-table maximum and the
-                // monitor re-sends it on every pass (Fans.Supervise). Max Fan (0x27) is
-                // not used: it is ignored on 8BAC, freezes the EC on the
-                // FanArray.HasMaxFanFreeze boards and has been linked to firmware
-                // hibernation on battery.
-                IsThermalPanic = true;
-                Platform.Fans.SetPanic(true);
+                case ThermalPanicTransition.Entered: {
 
-                string tempStr = Config.TemperatureUseFahrenheit
-                    ? ((maxTemp * 9 / 5) + 32) + "°F (" + maxTemp + "°C)"
-                    : maxTemp + "°C";
-                // Runs on the monitor thread → hand the balloon to the UI thread via the queue
-                Context.Monitor?.EnqueueBalloon(
-                    "⚠ " + tempStr + " — both fans forced to maximum!",
-                    "OmenMon — Thermal Panic",
-                    ToolTipIcon.Warning);
+                    // Level-based: every fan write is raised to the fan-table maximum and
+                    // the monitor re-sends it on every pass (Fans.Supervise). Max Fan
+                    // (0x27) is not used: it is ignored on 8BAC, freezes the EC on the
+                    // FanArray.HasMaxFanFreeze boards and has been linked to firmware
+                    // hibernation on battery.
+                    Platform.Fans.SetPanic(true);
 
-            } else if(IsThermalPanic) {
+                    string tempStr = Config.TemperatureUseFahrenheit
+                        ? ((maxTemp * 9 / 5) + 32) + "°F (" + maxTemp + "°C)"
+                        : maxTemp + "°C";
+                    // Runs on the monitor thread → hand the balloon to the UI thread via the queue
+                    Context.Monitor?.EnqueueBalloon(
+                        "⚠ " + tempStr + " — both fans forced to maximum!",
+                        "OmenMon — Thermal Panic",
+                        ToolTipIcon.Warning);
+                    break;
 
-                // Clears at or below (threshold - hysteresis), see ThermalPanicPolicy
-                if(!panic) {
+                }
 
-                    IsThermalPanic = false;
+                // Cleared at or below (threshold - hysteresis), see ThermalPanicPolicy
+                case ThermalPanicTransition.Cleared: {
+
                     Platform.Fans.SetPanic(false);
 
                     string tempStr = Config.TemperatureUseFahrenheit
@@ -432,8 +425,13 @@ namespace OmenMon.AppGui {
                         "Temperature normalized (" + tempStr + ") — fan control restored.",
                         "OmenMon — Thermal Panic",
                         ToolTipIcon.Info);
+                    break;
 
                 }
+
+                case ThermalPanicTransition.Disabled:
+                    Platform.Fans.SetPanic(false);
+                    break;
 
             }
 

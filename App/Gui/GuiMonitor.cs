@@ -486,8 +486,10 @@ namespace OmenMon.AppGui {
                     MonitorSnapshot s = Sample(formVisible || fullRequest, programRefreshedTemps);
                     // Overtemperature protection runs on the hottest validated reading
                     // (sensors were refreshed by Sample or the program tick just before);
-                    // with no valid reading it keeps its current state.
-                    op.CheckThermalPanic(op.Platform.GetHottestReading(false));
+                    // with no valid reading it keeps its current state, and while the
+                    // GPU's state is unknown it may start but not end
+                    SensorReading hottest = op.Platform.GetHottestReading(false, out bool complete);
+                    op.CheckThermalPanic(hottest, complete);
                     // Fan safety on the same fresh readings: raise a level that is no
                     // longer allowed (warmed up, sensors stopped reading, Fan Off time
                     // up) and re-send the panic level while panic is active

@@ -12,7 +12,7 @@ namespace OmenMon.Tests {
 
         private DateTime now = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
         private SensorReading cpu = SensorReading.None;
-        private SensorReading gpu = SensorReading.None;
+        private GpuReading gpu = GpuReading.None;
 
         private FanSafetyGuard NewGuard() {
             // The flat floor on its own; the warm curve has its own tests (WarmCurveTests)
@@ -21,7 +21,10 @@ namespace OmenMon.Tests {
         }
 
         private void Cpu(int celsius) { this.cpu = new SensorReading(celsius, this.now); }
-        private void Gpu(int celsius) { this.gpu = new SensorReading(celsius, this.now); }
+        private void Gpu(int celsius) { this.gpu = new GpuReading(new SensorReading(celsius, this.now), this.gpu.ZeroAt); }
+
+        // The GPU read 0 successfully (parked); a failed read changes nothing
+        private void GpuZero() { this.gpu = new GpuReading(this.gpu.Last, this.now); }
         private void Advance(TimeSpan span) { this.now += span; }
 
         private static readonly byte[] Off = { 0, 0 };
@@ -60,18 +63,95 @@ namespace OmenMon.Tests {
         public void StaleCpu_IsNeverCool() {
             var g = NewGuard();
             Cpu(40);
-            Advance(Platform.ReadingMaxAge + TimeSpan.FromSeconds(1));
+            Advance(g.Policy.ReadingMaxAge + TimeSpan.FromSeconds(1));
             Assert.Equal(Floor, g.Filter(Off));
         }
 
+        [Fact]
+        public void StaleRule_ComesFromThePolicy() {
+            var g = new FanSafetyGuard(new FanSafetyPolicy { WarmCurve = new SafetyStep[0], ReadingMaxAge = TimeSpan.FromSeconds(10) },
+                () => this.cpu, () => this.gpu, () => this.now);
+            Cpu(40);
+            Advance(TimeSpan.FromSeconds(10));
+            Assert.Equal(Off, g.Filter(Off));
+            Advance(TimeSpan.FromSeconds(1));
+            Assert.Equal(Floor, g.Filter(Off));
+            Assert.Null(g.Hottest());
+        }
+
+        // A GPU that parks keeps counting at its last value until that is stale (a single
+        // 0 can be a glitch); then its successful 0 reads say it is parked
         [Fact]
         public void WarmGpu_BlocksOff_ParkedGpuDoesNot() {
             var g = NewGuard();
             Cpu(40);
             Gpu(55);
             Assert.Equal(Floor, g.Filter(Off));
-            this.gpu = SensorReading.None;
+            GpuZero();
+            Assert.Equal(Floor, g.Filter(Off));
+            Advance(g.Policy.ReadingMaxAge + TimeSpan.FromSeconds(1));
+            Cpu(40);
+            GpuZero();
             Assert.Equal(Off, g.Filter(Off));
+        }
+
+        // fansafety-0: a GPU that has read before and now only fails (EC lock timeouts)
+        // is unknown, not parked: never cool, and no hottest temperature
+        [Fact]
+        public void GpuReadFailures_AfterAReading_AreUnknown_NeverCool() {
+            var g = NewGuard();
+            Cpu(40);
+            Gpu(45);
+            Assert.Equal(Off, g.Filter(Off));
+            Advance(g.Policy.ReadingMaxAge + TimeSpan.FromSeconds(1));
+            Cpu(40); // the BIOS CPU sensor keeps reading, the EC GPU sensor does not
+            Assert.False(g.IsCool());
+            Assert.Null(g.Hottest());
+            Assert.Equal(Floor, g.Filter(Off));
+        }
+
+        [Fact]
+        public void GpuReadFailures_RaiseAHeldFanOff() {
+            var g = NewGuard();
+            Cpu(40);
+            Gpu(45);
+            g.RecordWrite(Off, g.Filter(Off));
+            Assert.Equal(Off, g.Written);
+            Advance(TimeSpan.FromSeconds(30));
+            Cpu(40);
+            Assert.Null(g.Supervise());
+            Advance(TimeSpan.FromSeconds(16));
+            Cpu(40);
+            Assert.Equal(Floor, g.Supervise());
+        }
+
+        // A board without a GPU sensor (or a GPU parked since start) never reads: judged
+        // on the CPU alone, as before
+        [Fact]
+        public void GpuNeverObserved_IsJudgedOnTheCpu() {
+            var g = NewGuard();
+            Cpu(40);
+            Assert.True(g.IsCool());
+            Assert.Equal(40, g.Hottest());
+            Assert.Equal(Off, g.Filter(Off));
+        }
+
+        [Fact]
+        public void GpuReading_States() {
+            TimeSpan age = TimeSpan.FromSeconds(45);
+            DateTime t = this.now;
+            SensorReading at = new SensorReading(70, t);
+            Assert.Equal(GpuState.Parked, GpuReading.None.StateAt(t, age));
+            Assert.Equal(GpuState.Parked, new GpuReading(SensorReading.None, default(DateTime)).StateAt(t.AddHours(1), age));
+            Assert.Equal(GpuState.Fresh, new GpuReading(at, default(DateTime)).StateAt(t.AddSeconds(45), age));
+            Assert.Equal(GpuState.Unknown, new GpuReading(at, default(DateTime)).StateAt(t.AddSeconds(46), age));
+            // A later 0 does not override a fresh reading, and parks it once that is stale
+            Assert.Equal(GpuState.Fresh, new GpuReading(at, t.AddSeconds(5)).StateAt(t.AddSeconds(10), age));
+            Assert.Equal(GpuState.Parked, new GpuReading(at, t.AddSeconds(40)).StateAt(t.AddSeconds(60), age));
+            // ...until the 0 is stale too
+            Assert.Equal(GpuState.Unknown, new GpuReading(at, t.AddSeconds(40)).StateAt(t.AddSeconds(86), age));
+            // A 0 from before the last reading is staler than it
+            Assert.Equal(GpuState.Unknown, new GpuReading(at, t.AddSeconds(-1)).StateAt(t.AddSeconds(46), age));
         }
 
         [Fact]
@@ -122,7 +202,7 @@ namespace OmenMon.Tests {
             var g = NewGuard();
             Cpu(40);
             g.RecordWrite(Off, g.Filter(Off));
-            Advance(Platform.ReadingMaxAge + TimeSpan.FromSeconds(1));
+            Advance(g.Policy.ReadingMaxAge + TimeSpan.FromSeconds(1));
             Assert.Equal(Floor, g.Supervise());
         }
 

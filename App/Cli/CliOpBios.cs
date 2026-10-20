@@ -137,7 +137,8 @@ namespace OmenMon.AppCli {
                 if(t > 0 && t <= Config.MaxBelievableTemperature)
                     cpu = new SensorReading(t, now);
             } catch { }
-            SensorReading gpu = CliGpuReading(now);
+            // One read and no history: a GPU that does not read counts as parked, as before
+            GpuReading gpu = new GpuReading(CliGpuReading(now), default(DateTime));
             return new FanSafetyGuard(FanSafetyPolicy.FromConfig(),
                 () => cpu, () => gpu, () => now);
         }

@@ -17,15 +17,48 @@ namespace OmenMon.Tests {
 
         private DateTime now = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
         private SensorReading cpu = SensorReading.None;
-        private SensorReading gpu = SensorReading.None;
+        private GpuReading gpu = GpuReading.None;
 
         private FanSafetyGuard NewGuard() {
             return new FanSafetyGuard(new FanSafetyPolicy(), () => this.cpu, () => this.gpu, () => this.now);
         }
 
+        // gpuC null: a GPU that has never read (no sensor)
         private void Temps(int cpuC, int? gpuC) {
             this.cpu = new SensorReading(cpuC, this.now);
-            this.gpu = gpuC.HasValue ? new SensorReading(gpuC.Value, this.now) : SensorReading.None;
+            this.gpu = gpuC.HasValue ? new GpuReading(new SensorReading(gpuC.Value, this.now), default(DateTime)) : GpuReading.None;
+        }
+
+        // After a fan program is handed back, a later panic with nothing requested is a
+        // manual level: the warm curve applies on top of the panic level (before, the
+        // source stayed Program and only the panic level counted)
+        [Fact]
+        public void PanicAfterProgramHandBack_GetsTheCurve() {
+            var g = NewGuard();
+            Temps(65, 66);
+            g.RecordWrite(new byte[] { 30, 30 }, g.Filter(new byte[] { 30, 30 }, FanLevelSource.Program), FanLevelSource.Program);
+            g.RecordRelease();
+            Assert.Equal(FanLevelSource.Manual, g.RequestedSource);
+
+            Temps(88, 91);
+            g.SetPanic(new byte[] { 55, 55 });
+            Assert.Equal(new byte[] { 60, 63 }, g.Supervise());
+        }
+
+        // fansafety-0: the GPU read before and its reads now fail; the CPU still reads
+        [Fact]
+        public void Manual_UnknownGpu_GetsTheTopStep_ParkedGpuDoesNot() {
+            var g = NewGuard();
+            Temps(55, 55);
+            Assert.Equal(new byte[] { 20, 22 }, g.Filter(new byte[] { 0, 0 }));
+            this.now += TimeSpan.FromSeconds(46);
+            this.cpu = new SensorReading(55, this.now);
+            Assert.Equal(new byte[] { 60, 63 }, g.Filter(new byte[] { 0, 0 }));
+            Assert.Equal(new byte[] { 60, 63 }, g.HandBackLevel());
+
+            // Parked instead (a successful 0 read): judged on the CPU alone
+            this.gpu = new GpuReading(this.gpu.Last, this.now);
+            Assert.Equal(new byte[] { 20, 22 }, g.Filter(new byte[] { 0, 0 }));
         }
 
         [Theory]

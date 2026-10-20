@@ -26,6 +26,11 @@ namespace OmenMon.Hardware.Platform {
         // Below this (fresh, valid CPU reading; GPU too if it reads) the floor is waived [°C]
         public int CoolTemperature = 50;
 
+        // How old a temperature reading may be before the fan logic stops trusting it:
+        // a stale reading is an unknown temperature, and unknown counts as hot. The one
+        // place this is decided; Platform judges its readings by it too.
+        public TimeSpan ReadingMaxAge = TimeSpan.FromSeconds(Config.TemperatureMaxAge);
+
         // How long a manual level below the floor (Fan Off, constant minimum) may stay
         // in effect even while cool
         public TimeSpan BelowFloorMaxDuration = TimeSpan.FromMinutes(15);
@@ -131,9 +136,11 @@ namespace OmenMon.Hardware.Platform {
     //
     // Rules:
     //   * Floor: each fan gets at least its floor level unless the system is known to be
-    //     cool — a fresh, valid CPU reading below CoolTemperature (and the GPU below it
-    //     too, if the GPU reads). An unknown temperature is never cool. 0/0 (fans off) is
-    //     therefore impossible while warm or while the sensors do not read.
+    //     cool — a fresh, valid CPU reading below CoolTemperature, and the GPU below it
+    //     too or parked. An unknown temperature is never cool: a CPU without a fresh
+    //     reading, or a GPU that has read before and now gives neither a fresh reading
+    //     nor a 0 (failed reads). 0/0 (fans off) is therefore impossible while warm or
+    //     while the sensors do not read.
     //   * Time limit: a manual level below the floor that is allowed because the system
     //     is cool is raised to the floor after BelowFloorMaxDuration.
     //   * Panic: while thermal panic is active every write is raised to the panic level
@@ -148,7 +155,7 @@ namespace OmenMon.Hardware.Platform {
         public FanSafetyPolicy Policy { get; }
 
         private readonly Func<SensorReading> cpuReading;
-        private readonly Func<SensorReading> gpuReading;
+        private readonly Func<GpuReading> gpuReading;
         private readonly Func<DateTime> clock;
 
         // Last level asked for (before the rules), null if none or handed back
@@ -171,12 +178,12 @@ namespace OmenMon.Hardware.Platform {
         public FanSafetyGuard(
             FanSafetyPolicy policy,
             Func<SensorReading> cpuReading,
-            Func<SensorReading> gpuReading,
+            Func<GpuReading> gpuReading,
             Func<DateTime> clock) {
 
             this.Policy = policy ?? new FanSafetyPolicy();
             this.cpuReading = cpuReading ?? (() => SensorReading.None);
-            this.gpuReading = gpuReading ?? (() => SensorReading.None);
+            this.gpuReading = gpuReading ?? (() => GpuReading.None);
             this.clock = clock ?? (() => DateTime.UtcNow);
 
         }
@@ -203,14 +210,22 @@ namespace OmenMon.Hardware.Platform {
             }
         }
 
-        // The hottest fresh, valid reading, or null if the CPU does not read
+        // The hottest fresh, valid reading, or null (unknown) if the CPU does not read or
+        // the GPU's state is unknown; a parked GPU leaves the CPU's reading
         public int? Hottest() {
             DateTime now = this.Now;
             SensorReading cpu = this.cpuReading();
-            if(!cpu.IsFresh(now, Platform.ReadingMaxAge))
+            if(!cpu.IsFresh(now, this.Policy.ReadingMaxAge))
                 return null;
-            SensorReading gpu = this.gpuReading();
-            return gpu.IsFresh(now, Platform.ReadingMaxAge) && gpu.Value > cpu.Value ? gpu.Value : cpu.Value;
+            GpuReading gpu = this.gpuReading();
+            switch(gpu.StateAt(now, this.Policy.ReadingMaxAge)) {
+                case GpuState.Unknown:
+                    return null;
+                case GpuState.Fresh:
+                    return gpu.Last.Value > cpu.Value ? gpu.Last.Value : cpu.Value;
+                default:
+                    return cpu.Value;
+            }
         }
 
         // Whether the 0x10 keep-alive may run. False for HandBackQuietPeriod after a
@@ -225,12 +240,17 @@ namespace OmenMon.Hardware.Platform {
         public bool IsCool() {
             DateTime now = this.Now;
             SensorReading cpu = this.cpuReading();
-            if(!cpu.IsFresh(now, Platform.ReadingMaxAge) || cpu.Value >= this.Policy.CoolTemperature)
+            if(!cpu.IsFresh(now, this.Policy.ReadingMaxAge) || cpu.Value >= this.Policy.CoolTemperature)
                 return false;
-            SensorReading gpu = this.gpuReading();
-            if(gpu.IsFresh(now, Platform.ReadingMaxAge) && gpu.Value >= this.Policy.CoolTemperature)
-                return false;
-            return true;
+            GpuReading gpu = this.gpuReading();
+            switch(gpu.StateAt(now, this.Policy.ReadingMaxAge)) {
+                case GpuState.Unknown:
+                    return false;
+                case GpuState.Fresh:
+                    return gpu.Last.Value < this.Policy.CoolTemperature;
+                default:
+                    return true;
+            }
         }
 
         // Applies the rules to a requested level and returns what may be written
@@ -306,8 +326,13 @@ namespace OmenMon.Hardware.Platform {
         // that is no longer allowed, refresh the panic level), or null if none
         public byte[] Supervise() {
 
+            // Panic with nothing requested (entered from automatic mode, or after a
+            // hand-back) is judged as a manual level: nothing re-evaluates it, so the
+            // warm safety curve applies on top of the panic level
             if(this.panicLevel != null)
-                return Filter(this.requested ?? new byte[] { 0, 0 }, this.requestedSource);
+                return this.requested != null
+                    ? Filter(this.requested, this.requestedSource)
+                    : Filter(new byte[] { 0, 0 }, FanLevelSource.Manual);
 
             if(this.written == null)
                 return null;
@@ -353,6 +378,7 @@ namespace OmenMon.Hardware.Platform {
             this.released = true;
             this.releasedAt = this.Now;
             this.requested = null;
+            this.requestedSource = FanLevelSource.Manual;
             this.written = null;
             this.belowFloorSince = default(DateTime);
         }

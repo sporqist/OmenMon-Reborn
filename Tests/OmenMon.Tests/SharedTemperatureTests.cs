@@ -36,8 +36,29 @@ namespace OmenMon.Tests {
                 var rig = new TestRig();
                 var program = NewProgram(rig);
                 DateTime now = DateTime.UtcNow;
-                byte[] levels = program.SelectLevels(new SensorReading(55, now), new SensorReading(72, now), out bool safe);
+                byte[] levels = program.SelectLevels(new SensorReading(55, now), GpuState.Fresh, 72, out bool safe);
                 Assert.False(safe);
+                Assert.Equal(new byte[] { expectCpu, expectGpu }, levels);
+            } finally {
+                Config.FanProgramSharedTemperature = saved;
+            }
+        }
+
+        // fansafety-0: an unknown GPU (failed reads) gets the top row on the GPU fan, and
+        // on both fans when they share the temperature; a parked GPU follows the CPU
+        [Theory]
+        [InlineData(false, GpuState.Unknown, 30, 58, true)]
+        [InlineData(true, GpuState.Unknown, 55, 58, true)]
+        [InlineData(false, GpuState.Parked, 30, 33, false)]
+        [InlineData(true, GpuState.Parked, 30, 33, false)]
+        public void UnknownGpu_GetsTheTopRow(bool shared, GpuState state, byte expectCpu, byte expectGpu, bool expectSafe) {
+            bool saved = Config.FanProgramSharedTemperature;
+            try {
+                Config.FanProgramSharedTemperature = shared;
+                var rig = new TestRig();
+                var program = NewProgram(rig);
+                byte[] levels = program.SelectLevels(new SensorReading(55, DateTime.UtcNow), state, 0, out bool safe);
+                Assert.Equal(expectSafe, safe);
                 Assert.Equal(new byte[] { expectCpu, expectGpu }, levels);
             } finally {
                 Config.FanProgramSharedTemperature = saved;

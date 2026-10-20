@@ -47,6 +47,58 @@ namespace OmenMon.Hardware.Platform {
 
     }
 
+    // What the GPU temperature sensor says about the GPU at a given time
+    public enum GpuState {
+        Fresh,    // a valid reading within the age limit
+        Parked,   // reads 0 (dGPU powered off), or has never given a valid reading
+                  // (a board without a GPU sensor, or a GPU parked since start)
+        Unknown   // has read before, but neither a valid reading nor a 0 is recent:
+                  // the reads fail (EC lock timeouts, I/O errors) or are implausible
+    }
+
+    // The recent history of the GPU temperature sensor. The EC GPU register (8BAC: 0xB4)
+    // reads 0 while the dGPU is parked, and a failed EC read gives 0 as well, so the two
+    // are told apart by whether the read itself succeeded: a parked GPU is not a heat
+    // source, a GPU whose temperature is unknown counts as hot.
+    public readonly struct GpuReading {
+
+        public readonly SensorReading Last;  // last valid reading (None: there never was one)
+        public readonly DateTime ZeroAt;     // last read that succeeded with 0 (UTC; default: never)
+
+        public GpuReading(SensorReading last, DateTime zeroAt) {
+            this.Last = last;
+            this.ZeroAt = zeroAt;
+        }
+
+        // No GPU sensor, or one that has never read
+        public static readonly GpuReading None = default(GpuReading);
+
+        public GpuState StateAt(DateTime now, TimeSpan maxAge) {
+
+            // A fresh valid reading wins over a later 0: a single 0 can be a glitch, and a
+            // hot GPU must not drop out of the judgement for it. A GPU that really parked
+            // counts at its last value until that goes stale, as it always has.
+            if(this.Last.IsFresh(now, maxAge))
+                return GpuState.Fresh;
+
+            // Never observed: judged on the CPU alone, as before (boards without a GPU
+            // sensor, or a GPU parked since start)
+            if(!this.Last.HasValue)
+                return GpuState.Parked;
+
+            if(this.ZeroAt != default(DateTime) && now - this.ZeroAt <= maxAge)
+                return GpuState.Parked;
+
+            return GpuState.Unknown;
+
+        }
+
+        public override string ToString() {
+            return this.Last + (this.ZeroAt != default(DateTime) ? ", 0 @ " + this.ZeroAt.ToString("HH:mm:ss") : "");
+        }
+
+    }
+
     // Defines a common interface for all platform components
     public interface IPlatformComponent {
 
@@ -88,6 +140,11 @@ namespace OmenMon.Hardware.Platform {
         // Retrieves the last valid value and when it was read
         // (SensorReading.None if no read has ever been valid)
         public SensorReading GetReading();
+
+        // Retrieves when a read last succeeded with the value 0 (UTC; default(DateTime)
+        // if never). Only EC components report a failed read as such (TryRead); for the
+        // others a failed read that returns 0 counts here too.
+        public DateTime GetZeroReadAt();
 
     }
 
@@ -178,10 +235,19 @@ namespace OmenMon.Hardware.Platform {
         // reads for legacy reasons), this never changes on a failed or implausible read.
         protected SensorReading LastReading;
 
+        // When a read last succeeded with 0 (a parked GPU, as opposed to a failed read)
+        protected DateTime LastZeroAt;
+
         // Retrieves the last valid reading
         public virtual SensorReading GetReading() {
             AssertHasAccess(PlatformData.AccessType.Read);
             return this.LastReading;
+        }
+
+        // Retrieves when a read last succeeded with 0
+        public virtual DateTime GetZeroReadAt() {
+            AssertHasAccess(PlatformData.AccessType.Read);
+            return this.LastZeroAt;
         }
 
         // Whether a successfully read value is a real measurement. By default anything
@@ -224,9 +290,12 @@ namespace OmenMon.Hardware.Platform {
                 // Read the value, noting whether the read itself succeeded
                 bool readOk = TryRead(out int value);
 
-                // Record a valid reading regardless of the display logic below
+                // Record a valid reading regardless of the display logic below,
+                // and a successful 0 apart from a failed read
                 if(readOk && IsValidValue(value))
                     this.LastReading = new SensorReading(value, PlatformClock.UtcNow);
+                else if(readOk && value == 0)
+                    this.LastZeroAt = PlatformClock.UtcNow;
 
                 // Hold off on one additional time
                 // for values that might be intermittently zeroed
