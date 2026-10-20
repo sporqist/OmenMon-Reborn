@@ -419,8 +419,18 @@ namespace OmenMon.Hardware.Platform {
         // (failed reads, not a parked GPU): without them the system state is unknown,
         // whatever else reads.
         public SensorReading GetHottestReading(bool forceUpdate = false) {
+            SensorReading hottest = GetHottestReading(forceUpdate, out bool complete);
+            return complete ? hottest : SensorReading.None;
+        }
+
+        // The same, but while the GPU's state is unknown it returns the hottest of what
+        // does read with complete = false: the true hottest temperature is at least that
+        // (thermal panic may start on it, never end on it). None if the CPU has no fresh
+        // reading.
+        public SensorReading GetHottestReading(bool forceUpdate, out bool complete) {
             if(forceUpdate)
                 UpdateTemperature(false);
+            complete = true;
             DateTime now = PlatformClock.UtcNow;
             SensorReading cpu = GetCpuReading(false);
             if(!cpu.HasValue)
@@ -429,7 +439,8 @@ namespace OmenMon.Hardware.Platform {
             GpuReading gpu = GetGpuReading(false);
             switch(gpu.StateAt(now, ReadingMaxAge)) {
                 case GpuState.Unknown:
-                    return SensorReading.None;
+                    complete = false;
+                    break;
                 case GpuState.Fresh:
                     hottest = Hotter(hottest, gpu.Last);
                     break;

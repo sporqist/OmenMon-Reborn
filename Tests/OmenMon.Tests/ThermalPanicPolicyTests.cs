@@ -4,6 +4,7 @@
 // OmenMon-Reborn additions © 2026 seakyy
 
 using OmenMon.Hardware.Platform;
+using OmenMon.Library;
 using OmenMon.Tests.Fakes;
 
 namespace OmenMon.Tests {
@@ -25,6 +26,18 @@ namespace OmenMon.Tests {
         [Fact]
         public void Activates_Above100() {
             Assert.True(ThermalPanicPolicy.Next(false, R(104), 90, 5));
+        }
+
+        // An incomplete reading (the GPU's state is unknown) is a lower bound: it may
+        // start panic, it never ends it
+        [Fact]
+        public void IncompleteReading_MayActivate_NeverClears() {
+            Assert.False(ThermalPanicPolicy.Next(false, R(89), false, 90, 5));
+            Assert.True(ThermalPanicPolicy.Next(false, R(90), false, 90, 5));
+            Assert.True(ThermalPanicPolicy.Next(true, R(40), false, 90, 5));
+            Assert.False(ThermalPanicPolicy.Next(true, R(40), true, 90, 5));
+            Assert.False(ThermalPanicPolicy.Next(false, SensorReading.None, false, 90, 5));
+            Assert.True(ThermalPanicPolicy.Next(true, SensorReading.None, false, 90, 5));
         }
 
         [Fact]
@@ -66,6 +79,27 @@ namespace OmenMon.Tests {
             rig.SetCpuTemperature(celsius);
             Assert.Equal(celsius, rig.Platform.GetCpuReading(true).Value);
             Assert.Equal(celsius, rig.Platform.GetHottestReading(false).Value);
+        }
+
+        // The GPU read 92 and its reads then fail: the CPU's 55 is only a lower bound,
+        // a hot CPU still counts
+        [Fact]
+        public void HottestReading_WithUnknownGpu_IsIncomplete() {
+            var rig = new TestRig();
+            rig.SetCpuTemperature(55);
+            rig.Ec.GpuTemperature = 92;
+            Assert.Equal(92, rig.Platform.GetHottestReading(true, out bool complete).Value);
+            Assert.True(complete);
+
+            rig.Ec.LockFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            Assert.Equal(55, rig.Platform.GetHottestReading(true, out complete).Value);
+            Assert.False(complete);
+            Assert.False(rig.Platform.GetHottestReading(false).HasValue);
+
+            rig.SetCpuTemperature(97); // only the BIOS sensor reads
+            Assert.Equal(97, rig.Platform.GetHottestReading(true, out complete).Value);
+            Assert.False(complete);
         }
 
         [Fact]

@@ -379,8 +379,9 @@ namespace OmenMon.AppGui {
 
         // Checks temperature and activates or deactivates Thermal Panic Mode.
         // Takes the hottest validated reading: a missing reading (failed, implausible or
-        // stale sensor reads) neither triggers nor clears panic.
-        public void CheckThermalPanic(SensorReading hottest) {
+        // stale sensor reads) neither triggers nor clears panic, and an incomplete one
+        // (complete = false: the GPU's state is unknown) may trigger it but never clears it.
+        public void CheckThermalPanic(SensorReading hottest, bool complete = true) {
 
             // If panic is currently active but the feature has been disabled (e.g. user toggled
             // it off at runtime or the dynamic icon was turned off), clear the stuck state so
@@ -393,7 +394,7 @@ namespace OmenMon.AppGui {
                 return;
             }
 
-            bool panic = ThermalPanicPolicy.Next(IsThermalPanic, hottest,
+            bool panic = ThermalPanicPolicy.Next(IsThermalPanic, hottest, complete,
                 Config.ThermalPanicTemperature, Config.ThermalPanicHysteresis);
             int maxTemp = hottest.Value;
 
