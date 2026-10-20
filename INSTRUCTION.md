@@ -215,6 +215,8 @@ OmenMon.exe [mode] [options]
 | `-GpuPower <level>` | Set GPU power (Maximum/Medium/Minimum) |
 | `-Ec` | Open EC monitor |
 | `-Probe` | Run heuristic hardware scanner |
+| `-EcoPlus` | List the original settings Eco+ keeps to restore |
+| `-EcoPlus Restore` | Restore everything Eco+ changed (turbo boost on battery, refresh rate, GPU preferences). Exit OmenMon first; use before uninstalling |
 
 ---
 

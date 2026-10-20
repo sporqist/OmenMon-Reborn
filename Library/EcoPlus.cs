@@ -147,6 +147,8 @@ namespace OmenMon.Library {
         // schemes). Returns a short description of what changed, or null.
         public string Maintain(bool onBattery) {
             lock(this.sync) {
+                if(this.stopped)
+                    return null;
                 EcoPlusOptions o = this.options();
                 List<string> done = new List<string>();
 
@@ -329,6 +331,37 @@ namespace OmenMon.Library {
                 return;   // tried again on the next call
             ForgetRefresh();
             SaveRestored();
+        }
+
+        // OmenMon exits (or the Windows session ends): the battery settings are put back
+        // and Eco+ changes nothing more in this run. The next start applies them again.
+        // GPU preferences stay: they are an explicit choice, not tied to battery, and
+        // nothing would set them again after a restart.
+        public string RestoreForExit() {
+            lock(this.sync) {
+                this.stopped = true;
+                return RestoreSettingsLocked();
+            }
+        }
+
+        private bool stopped;
+
+        // Everything Eco+ changed, GPU preferences included (OmenMon -EcoPlus Restore,
+        // for uninstalling); a description of what was done, or null if nothing was saved
+        public string RestoreAll() {
+            lock(this.sync) {
+                this.stopped = true;
+                List<string> done = new List<string>();
+                string settings = RestoreSettingsLocked();
+                if(settings != null)
+                    done.Add(settings);
+                int restored = RestoreGpu(out int skipped);
+                if(restored > 0)
+                    done.Add(restored + " GPU preference(s) back");
+                if(skipped > 0)
+                    done.Add(skipped + " GPU preference(s) changed since and left as they are");
+                return done.Count > 0 ? string.Join(", ", done) : null;
+            }
         }
 
         // Writes back every boost value and the refresh rate Eco+ changed

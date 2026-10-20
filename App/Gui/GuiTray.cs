@@ -191,6 +191,10 @@ namespace OmenMon.AppGui {
             this.EcoPlusDisplayCount = DisplayRate.ActiveCount();
             SystemEvents.DisplaySettingsChanged += EventDisplayChange;
 
+            // Eco+: the battery settings are put back on exit, and also when the Windows
+            // session ends (logoff, shutdown), which does not always reach ExitThreadCore
+            SystemEvents.SessionEnded += EventSessionEnded;
+
             // Battery-glitch hibernation guard — issue #59. Records the
             // baseline Windows-reported battery percentage now so the very
             // next timer tick has something to compare against; nothing
@@ -242,6 +246,7 @@ namespace OmenMon.AppGui {
             // Unregister the power-mode change event handler
             SystemEvents.PowerModeChanged -= EventPowerChange;
             SystemEvents.DisplaySettingsChanged -= EventDisplayChange;
+            SystemEvents.SessionEnded -= EventSessionEnded;
 
             // Stop receiving power event notifications
             Gui.UnregisterSuspendResumeNotification();
@@ -255,6 +260,9 @@ namespace OmenMon.AppGui {
                 else
                     this.Op.Platform.Fans.ReleaseIfHeld();
             }
+
+            // Eco+: put the battery settings back (after the fans: they matter more)
+            RestoreEcoPlus("on exit: ");
 
             // Perform the usual tasks
             base.ExitThreadCore();
@@ -348,6 +356,21 @@ namespace OmenMon.AppGui {
                     this.EcoPlusDisplayCount = count;
                     this.Op?.EcoPlus.NoteDisplayReset();
                 }
+            } catch { }
+        }
+
+        // Handles the end of the Windows session (any thread)
+        private void EventSessionEnded(object sender, SessionEndedEventArgs e) {
+            RestoreEcoPlus("session ending: ");
+        }
+
+        // Puts the Eco+ battery settings back; idempotent, Eco+ changes nothing afterwards
+        private void RestoreEcoPlus(string prefix) {
+            try {
+                string done = this.Op?.EcoPlus.RestoreForExit();
+                if(done != null)
+                    EcoPlusLog.Append(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusLog.FileName),
+                        DateTime.Now, prefix + done);
             } catch { }
         }
 

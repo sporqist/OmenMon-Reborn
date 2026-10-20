@@ -456,6 +456,49 @@ namespace OmenMon.Tests {
             Assert.True(eco.State.IsEmpty);
         }
 
+        // On exit the battery settings go back; GPU preferences are an explicit choice and stay
+        [Fact]
+        public void Exit_RestoresBoostAndRefresh_KeepsGpu_AndChangesNothingAfterwards() {
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            var eco = NewEco();
+            eco.Maintain(true);
+            eco.ReleaseGpu(new[] { "a.exe" });
+            Assert.NotNull(eco.RestoreForExit());
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Equal(EcoPlus.GpuPowerSaving, this.gpu.Get("a.exe"));
+            Assert.Null(eco.Maintain(true));
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Single(EcoPlusState.Load(StatePath).SavedGpu);
+        }
+
+        [Fact]
+        public void RestoreAll_PutsEverythingBack_AsTheCliDoes() {
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            NewEco().Maintain(true);
+            NewEco().ReleaseGpu(new[] { "a.exe" });
+            this.options = new EcoPlusOptions { Enabled = false };
+            var cli = NewEco();                  // a separate process, from the state file alone
+            string done = cli.RestoreAll();
+            Assert.Contains("1 GPU preference(s) back", done);
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(this.gpu.Get("a.exe"));
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
+        public void RestoreAll_WithNoState_DoesNothing() {
+            this.plan.Dc[Balanced] = 0;
+            this.display.Hz = 60;
+            Assert.Null(NewEco().RestoreAll());
+            Assert.Equal(0, this.plan.Writes);
+            Assert.Equal(0, this.display.Sets);
+            Assert.Empty(this.gpu.Values);
+            Assert.False(File.Exists(StatePath));
+        }
+
         [Fact]
         public void Gpu_AlreadyPowerSaving_IsSkipped() {
             this.gpu.Values["a.exe"] = EcoPlus.GpuPowerSaving;
