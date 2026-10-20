@@ -113,16 +113,9 @@ namespace OmenMon.AppGui {
 
             // Last-chance hand-back of fan control to the BIOS on process exit or a fatal
             // crash (App.OnExit, Crash). Takes the hardware lock if it can get it within
-            // 2 s; a crashed thread may still hold it, and handing back matters more.
-            FanHandBack.Register(() => {
-                bool locked = Monitor.TryEnter(this.HardwareLock, 2000);
-                try {
-                    this.Platform.Fans.ReleaseIfHeld();
-                } finally {
-                    if(locked)
-                        Monitor.Exit(this.HardwareLock);
-                }
-            });
+            // a part of the time Run() is given (FanHandBack.LockWaitMs); a crashed thread
+            // may still hold it, and handing back matters more.
+            FanHandBack.Register(() => this.Platform.Fans.ReleaseIfHeld(), this.HardwareLock);
 
             // Set the full power flag using the multi-source check so a boot that
             // happens to land mid-flicker (issue #70) does not load the alternate
