@@ -35,6 +35,10 @@ namespace OmenMon.Tests.Fakes {
         // Reported by 0x23
         public byte CpuTemperature { get; set; } = 45;
 
+        // Returned by 0x2F: fan count, row count, then per row the CPU and GPU fan level
+        // and the temperature
+        public byte[] FanTable { get; set; } = { 2, 3, 20, 22, 40, 35, 37, 60, 52, 55, 80 };
+
         // When set, every call fails client-side (rc -1), like a broken WMI session
         public bool FailAll { get; set; }
 
@@ -141,9 +145,8 @@ namespace OmenMon.Tests.Fakes {
                     outData[0] = 0;
                     return 0;
 
-                case 0x2F: // Fan table: 2 fans, 3 rows (cpu, gpu, temperature)
-                    byte[] table = { 2, 3, 20, 22, 40, 35, 37, 60, 52, 55, 80 };
-                    Array.Copy(table, outData, Math.Min(table.Length, outData.Length));
+                case 0x2F: // Fan table (FanTable)
+                    Array.Copy(this.FanTable, outData, Math.Min(this.FanTable.Length, outData.Length));
                     return 0;
 
                 case 0x27: // Max Fan: ignored on 8BAC

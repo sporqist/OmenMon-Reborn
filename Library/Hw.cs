@@ -386,9 +386,17 @@ namespace OmenMon.Library {
 
         // Variants of the four register accessors above that report whether the EC lock
         // was obtained (false: lock timeout or no EC). The register access itself is the
-        // same ReadByte / ReadWord / WriteByte / WriteWord call on Hw.Ec.
+        // same ReadByte / ReadWord / WriteByte / WriteWord call on Hw.Ec. The byte read
+        // also reports an EC handshake that failed on every retry, which leaves the same
+        // 0 that EcGetByte returns, as a failed read: temperature sensors are byte-sized,
+        // and a failed GPU read must not look like a parked GPU.
         public static bool TryEcGetByte(byte register, out byte value) {
-            return Hw.TryEcExec<byte>(ec => ec.ReadByte(register), Hw.Ec, out value);
+            bool read = false;
+            bool locked = Hw.TryEcExec<byte>(ec => {
+                read = ec.TryReadByte(register, out byte b);
+                return b;
+            }, Hw.Ec, out value);
+            return locked && read;
         }
 
         public static bool TryEcGetWord(byte register, out ushort value) {

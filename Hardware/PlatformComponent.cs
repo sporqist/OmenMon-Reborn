@@ -53,7 +53,8 @@ namespace OmenMon.Hardware.Platform {
         Parked,   // reads 0 (dGPU powered off), or has never given a valid reading
                   // (a board without a GPU sensor, or a GPU parked since start)
         Unknown   // has read before, but neither a valid reading nor a 0 is recent:
-                  // the reads fail (EC lock timeouts, I/O errors) or are implausible
+                  // the reads fail (EC lock timeouts, a failed EC handshake) or are
+                  // implausible
     }
 
     // The recent history of the GPU temperature sensor. The EC GPU register (8BAC: 0xB4)
@@ -414,8 +415,8 @@ namespace OmenMon.Hardware.Platform {
         }
 
         // Reads a value from the Embedded Controller, reporting whether the EC lock was
-        // obtained. On failure the value is 0, which is what Hw.EcGetByte/EcGetWord return
-        // on a lock timeout.
+        // obtained (and, for a byte, whether the EC handshake succeeded). On failure the
+        // value is 0, which is what Hw.EcGetByte/EcGetWord return for it.
         protected bool TryReadRegister(out int value) {
             bool ok;
             if(this.Size == PlatformData.DataSize.Byte) {
@@ -434,7 +435,7 @@ namespace OmenMon.Hardware.Platform {
             return value;
         }
 
-        // Reads a value from the Embedded Controller, reporting a lock failure
+        // Reads a value from the Embedded Controller, reporting a failed read
         protected override bool TryRead(out int value) {
             return TryReadRegister(out value);
         }

@@ -376,31 +376,26 @@ namespace OmenMon.AppGui {
                 Platform.Fans.SetPanic(false);
         }
 
-        // Checks temperature and activates or deactivates Thermal Panic Mode.
-        // Takes the hottest validated reading: a missing reading (failed, implausible or
-        // stale sensor reads) neither triggers nor clears panic, and an incomplete one
-        // (complete = false: the GPU's state is unknown) may trigger it but never clears it.
-        public void CheckThermalPanic(SensorReading hottest, bool complete = true) {
+        // Checks temperature and activates or deactivates Thermal Panic Mode, on the
+        // sensors the monitor pass has just read. Takes the hottest validated reading: a
+        // missing reading (failed, implausible or stale sensor reads) neither triggers nor
+        // clears panic, and an incomplete one (the GPU's state is unknown) may trigger it
+        // but never clears it.
+        public void CheckThermalPanic() {
 
-            // The state and its rules are in ThermalPanicState; this does the I/O. If the
-            // feature has been disabled while panic is active (e.g. user toggled it off at
-            // runtime or the dynamic icon was turned off), the state is cleared so fans
-            // are not left at max indefinitely.
-            ThermalPanicTransition transition = this.thermalPanic.Update(
-                Config.ThermalPanicEnabled, hottest, complete,
-                Config.ThermalPanicTemperature, Config.ThermalPanicHysteresis);
+            // The reading, the state and the fan changes are in ThermalPanicState.Check
+            // (tested); this adds the notification. If the feature has been disabled while
+            // panic is active (e.g. user toggled it off at runtime or the dynamic icon was
+            // turned off), the state is cleared so fans are not left at max indefinitely.
+            ThermalPanicTransition transition = this.thermalPanic.Check(this.Platform,
+                Config.ThermalPanicEnabled, Config.ThermalPanicTemperature, Config.ThermalPanicHysteresis,
+                out SensorReading hottest);
             int maxTemp = hottest.Value;
 
             switch(transition) {
 
+                // The fans are at the panic level (see ThermalPanicState.Check)
                 case ThermalPanicTransition.Entered: {
-
-                    // Level-based: every fan write is raised to the fan-table maximum and
-                    // the monitor re-sends it on every pass (Fans.Supervise). Max Fan
-                    // (0x27) is not used: it is ignored on 8BAC, freezes the EC on the
-                    // FanArray.HasMaxFanFreeze boards and has been linked to firmware
-                    // hibernation on battery.
-                    Platform.Fans.SetPanic(true);
 
                     string tempStr = Config.TemperatureUseFahrenheit
                         ? ((maxTemp * 9 / 5) + 32) + "°F (" + maxTemp + "°C)"
@@ -414,10 +409,9 @@ namespace OmenMon.AppGui {
 
                 }
 
-                // Cleared at or below (threshold - hysteresis), see ThermalPanicPolicy
+                // Cleared at or below (threshold - hysteresis), see ThermalPanicPolicy;
+                // fan control is restored
                 case ThermalPanicTransition.Cleared: {
-
-                    Platform.Fans.SetPanic(false);
 
                     string tempStr = Config.TemperatureUseFahrenheit
                         ? ((maxTemp * 9 / 5) + 32) + "°F (" + maxTemp + "°C)"
@@ -430,10 +424,6 @@ namespace OmenMon.AppGui {
                     break;
 
                 }
-
-                case ThermalPanicTransition.Disabled:
-                    Platform.Fans.SetPanic(false);
-                    break;
 
             }
 

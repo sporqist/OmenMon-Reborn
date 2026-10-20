@@ -205,6 +205,37 @@ namespace OmenMon.Tests {
             Assert.Equal(new byte[] { 20, 22 }, rig.Bios.LevelWrites[^1]);
         }
 
+        // The EC lock is obtained, but the EC handshake fails on every retry (issue #86:
+        // OutFull never set), while the BIOS CPU sensor keeps reading. The EC read path
+        // returns 0 for that; it is a failed read, so a GPU that has read before is
+        // unknown, not parked.
+        [Fact]
+        public void EcHandshakeFailure_AfterAGpuReading_IsUnknown_NeverCool() {
+            using var rig = new TestRig(ecDriver: true);
+            rig.SetCpuTemperature(40);
+            rig.Ec.GpuTemperature = 45;
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(45, rig.Platform.GetGpuReading().Last.Value); // read through the EC driver path
+            Assert.True(rig.Fans.Guard.IsCool());
+
+            rig.Driver!.HandshakeFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            rig.Platform.UpdateTemperature();
+            Assert.True(rig.Platform.GetCpuReading().HasValue); // the BIOS sensor reads
+            Assert.Equal(GpuState.Unknown,
+                rig.Platform.GetGpuReading().StateAt(PlatformClock.UtcNow, rig.Platform.ReadingMaxAge));
+            Assert.False(rig.Fans.Guard.IsCool());
+            Assert.False(rig.Platform.GetHottestReading().HasValue);
+
+            // The handshake works again and the GPU reads 0: parked
+            rig.Driver.HandshakeFails = false;
+            rig.Ec.GpuTemperature = 0;
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(GpuState.Parked,
+                rig.Platform.GetGpuReading().StateAt(PlatformClock.UtcNow, rig.Platform.ReadingMaxAge));
+            Assert.True(rig.Fans.Guard.IsCool());
+        }
+
         // A board whose GPU sensor never reads (or a GPU parked since start) is judged on
         // the CPU alone, as before, also while the EC lock fails
         [Fact]
