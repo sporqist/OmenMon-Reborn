@@ -516,6 +516,31 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_TwoCopiesThatBothLoad_UpdatesTheOneThatLoaded() {
+            // A revised copy of Alpha pasted below the old one, both valid
+            const string revised = @"<Program Name=""Alpha""><FanMode>Default</FanMode><GpuPower>Medium</GpuPower>"
+                + @"<Level Temperature=""00""><Cpu>25</Cpu><Gpu>28</Gpu></Level></Program>";
+            File.WriteAllText(File_, Fixture.Replace(@"<Program Name=""Broken"">", revised + @"<Program Name=""Broken"">"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+            string first = before.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Alpha']")![0]!.OuterXml;
+            Config.Load();
+            Assert.Equal(25, Config.FanProgram["Alpha"].Level[0][0]); // the last copy loads
+
+            // Changed in the application: the copy that loaded is updated, the first stays
+            Config.FanProgram["Alpha"].Level[60] = new byte[] { 40, 40 };
+            XmlNodeList list = SaveAndRead().SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Alpha']")!;
+            Assert.Equal(2, list.Count);
+            Assert.Equal(first, list[0]!.OuterXml);
+
+            // And the change loads on the next start
+            Config.FanProgram = new SortedList<string, FanProgramData>();
+            Config.Load();
+            Assert.Equal(25, Config.FanProgram["Alpha"].Level[0][0]);
+            Assert.Equal(40, Config.FanProgram["Alpha"].Level[60][0]);
+        }
+
+        [Fact]
         public void Save_SensorsThatDidNotLoad_AreNotReplacedByTheDefaults() {
             // No sensor is set to be used, so loading keeps the defaults
             File.WriteAllText(File_, Fixture.Replace("<Models>",
