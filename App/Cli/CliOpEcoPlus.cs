@@ -12,8 +12,9 @@ using OmenMon.Library;
 namespace OmenMon.AppCli {
 
     // Implements the main operation loop in the application's CLI mode
-    // This part covers Eco+: what it saved to restore, and restoring it all without the
-    // GUI (for uninstalling). Reads only the state file and Windows settings; no EC or BIOS.
+    // This part covers Eco+: what it saved to restore (turbo boost on battery, the
+    // refresh rate), and restoring it all without the GUI (for uninstalling). Reads only
+    // the state file and Windows settings; no EC or BIOS.
     public static partial class CliOp {
 
         private static string EcoPlusStatePath {
@@ -37,25 +38,24 @@ namespace OmenMon.AppCli {
                 Console.WriteLine("Refresh rate: original " + state.RefreshBefore.Value + " Hz"
                     + (state.RefreshSet > 0 ? ", Eco+ set " + state.RefreshSet + " Hz" : "")
                     + (state.RefreshDisplay != null ? " on " + state.RefreshDisplay : ""));
-            foreach(KeyValuePair<string, string> g in state.SavedGpu)
-                Console.WriteLine("GPU preference: " + g.Key + ": original " + RegistryGpuPreferences.Describe(g.Value));
+            if(state.SavedGpu.Count > 0)
+                Console.WriteLine(state.SavedGpu.Count + " GPU preference(s) saved by an earlier Eco+: they move to Graphics apps"
+                    + " on the next start of OmenMon or -Graphics Apply, Restore or Adopt");
         }
 #endregion
 
 #region Eco+ Restore
-        // Puts back everything Eco+ changed (-EcoPlus Restore): turbo boost on battery, the
-        // refresh rate and the GPU preferences, each only while it is still as Eco+ set
-        // it. Refuses while the GUI runs, since it would apply Eco+ again and keeps its
+        // Puts back everything Eco+ changed (-EcoPlus Restore): turbo boost on battery and
+        // the refresh rate, each only while it is still as Eco+ set it. GPU preferences
+        // are Graphics apps' (-Graphics Restore): any an earlier Eco+ saved are moved there
+        // first. Refuses while the GUI runs, since it would apply Eco+ again and keeps its
         // own copy of the state. Exit code 1 if refused or the state file is unreadable.
         private static void EcoPlusRestore() {
-            if(Mutex.TryOpenExisting(Config.LockPathGui, out Mutex gui)) {
-                gui.Dispose();
-                Cli.PrintError("OmenMon is running: exit it first (that puts the battery settings back), then run this again");
-                Environment.ExitCode = 1;
+            if(GuiRunning("exit it first (that puts the battery settings back), then run this again"))
                 return;
-            }
             EcoPlusState state = EcoPlusState.Load(EcoPlusStatePath);
-            EcoPlus eco = new EcoPlus(new WindowsPowerPlan(), new RegistryGpuPreferences(), new DisplayRate(), state,
+            GraphicsState graphics = GraphicsMigrate(state);
+            EcoPlus eco = new EcoPlus(new WindowsPowerPlan(), new DisplayRate(), state,
                 () => new EcoPlusOptions { Enabled = false });
             if(state.LoadError != null) {
                 Cli.PrintError("Eco+: " + state.LoadError);
@@ -71,6 +71,21 @@ namespace OmenMon.AppCli {
                 Cli.PrintError("Eco+: " + eco.LastError);
                 Environment.ExitCode = 1;
             }
+            if(!graphics.IsEmpty || graphics.Blocked)
+                Console.WriteLine("GPU preferences are not part of Eco+ and were left as they are: "
+                    + (graphics.Blocked ? "the Graphics apps state cannot be read"
+                        : graphics.Managed.Count + " app(s) managed by Graphics apps") + " (see -Graphics; -Graphics Restore puts them back)");
+        }
+
+        // Whether the GUI runs: then a change from here is refused (exit code 1), with
+        // what to do about it
+        private static bool GuiRunning(string what) {
+            if(!Mutex.TryOpenExisting(Config.LockPathGui, out Mutex gui))
+                return false;
+            gui.Dispose();
+            Cli.PrintError("OmenMon is running: " + what);
+            Environment.ExitCode = 1;
+            return true;
         }
 #endregion
 

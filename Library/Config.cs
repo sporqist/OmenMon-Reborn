@@ -144,6 +144,7 @@ namespace OmenMon.Library {
         private static readonly HashSet<string> LoadedFanPrograms = new HashSet<string>();
         private static readonly HashSet<string> LoadedSensors = new HashSet<string>();
         private static readonly HashSet<string> LoadedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> LoadedGraphicsProfiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Whether the configuration file exists but could not be loaded: the settings in
         // use are then (mostly) the defaults, and a save must not write them over the file
@@ -160,6 +161,11 @@ namespace OmenMon.Library {
         private static Dictionary<string, string> SnapshotFanPrograms;
         private static Dictionary<string, string> SnapshotSensors;
         private static Dictionary<string, string> SnapshotModels;
+        private static Dictionary<string, string> SnapshotGraphicsProfiles;
+
+        // The active graphics profile as loaded, or as the last save left it (null
+        // before Load()); like a scalar, it is written only if it changed since
+        private static string GraphicsProfileActiveLoaded;
 
         // Retrieves an unsigned word-sized value from the XML configuration file
         private static bool GetWord(XmlDocument xml, string node, out ushort value) {
@@ -183,6 +189,7 @@ namespace OmenMon.Library {
             LoadedFanPrograms.Clear();
             LoadedSensors.Clear();
             LoadedModels.Clear();
+            LoadedGraphicsProfiles.Clear();
             LoadFailedBackedUp = false;
             LoadFailedReported = false;
 
@@ -591,6 +598,22 @@ namespace OmenMon.Library {
                         }
                     }
 
+                    // Load the graphics app profiles (there are no defaults: the file's
+                    // replace what is in memory) and the one last applied
+                    SortedList<string, GraphicsProfile> graphicsProfiles =
+                        new SortedList<string, GraphicsProfile>(StringComparer.OrdinalIgnoreCase);
+                    foreach(XmlNode node in xml.SelectNodes(XmlPrefixGraphicsProfile)) {
+                        // Invalid entries are not loaded (but stay in the file)
+                        GraphicsProfile profile;
+                        if(TryParseGraphicsProfile(node, out profile)) {
+                            graphicsProfiles[profile.Name] = profile;
+                            LoadedGraphicsProfiles.Add(profile.Name);
+                        }
+                    }
+                    GraphicsProfiles = graphicsProfiles;
+                    XmlElement graphics = xml.SelectSingleNode(XmlPrefixGraphicsProfiles.TrimEnd('/')) as XmlElement;
+                    GraphicsProfileActive = graphics != null ? graphics.GetAttribute(XmlAttrGraphicsProfilesActive) : "";
+
                 } catch {
 
                     // Carry on with the defaults, but remember that the file did not load:
@@ -605,11 +628,42 @@ namespace OmenMon.Library {
             // Remember the values as loaded, to save only what changes (see SaveScalars());
             // a custom preset read from the stray element is saved where it belongs
             ScalarsLoaded = ScalarSnapshot();
+            GraphicsProfileActiveLoaded = GraphicsProfileActive ?? "";
             if(strayCustomPreset)
                 foreach(string name in CustomPresetValues)
                     ScalarsLoaded.Remove(XmlPathCustomPreset + name);
             TakeEntrySnapshots();
 
+        }
+
+        // Parses a graphics app profile element: a valid name and nothing but valid,
+        // distinct <App Key="..." Gpu="..."/> elements (a profile with anything else in it
+        // is not loaded, so a save never rewrites it without that)
+        private static bool TryParseGraphicsProfile(XmlNode node, out GraphicsProfile profile) {
+            profile = null;
+            try {
+                XmlElement element = node as XmlElement;
+                if(element == null || !GraphicsProfile.IsValidName(element.GetAttribute(XmlAttrGraphicsProfileName)))
+                    return false;
+                GraphicsProfile p = new GraphicsProfile(element.GetAttribute(XmlAttrGraphicsProfileName));
+                foreach(XmlNode child in element.ChildNodes) {
+                    if(child.NodeType == XmlNodeType.Comment || child.NodeType == XmlNodeType.Whitespace)
+                        continue;
+                    XmlElement app = child as XmlElement;
+                    if(app == null || app.Name != XmlElementGraphicsApp)
+                        return false;
+                    string key = app.GetAttribute(XmlAttrGraphicsAppKey);
+                    string gpu = app.GetAttribute(XmlAttrGraphicsAppGpu);
+                    if(!GraphicsProfile.IsValidApp(key) || p.Contains(key)
+                        || !Enum.IsDefined(typeof(GpuChoice), gpu))
+                        return false;
+                    p.Set(key, (GpuChoice) Enum.Parse(typeof(GpuChoice), gpu));
+                }
+                profile = p;
+                return true;
+            } catch {
+                return false;
+            }
         }
 
         // Parses a color preset element
@@ -963,6 +1017,16 @@ namespace OmenMon.Library {
                     return TryParseModel(node, out p) ? BuildModel(xml, p) : null; },
                 (id, p) => BuildModel(xml, p));
 
+            // Graphics app profiles, and the one last applied
+            MergeEntries(xml, XmlPrefixGraphicsProfiles,
+                XmlElementGraphicsProfile, KeyOfGraphicsProfile, GraphicsProfiles, LoadedGraphicsProfiles,
+                fromFile ? SnapshotGraphicsProfiles : null,
+                node => {
+                    GraphicsProfile profile;
+                    return TryParseGraphicsProfile(node, out profile) ? BuildGraphicsProfile(xml, profile.Name, profile) : null; },
+                (name, profile) => BuildGraphicsProfile(xml, name, profile));
+            string graphicsActiveSaved = SaveGraphicsProfileActive(xml, fromFile);
+
             // Write to a temporary file next to the configuration file
             string tempPath = FilePath + ".tmp";
             XmlWriterSettings xmlWriterSettings = new XmlWriterSettings();
@@ -997,8 +1061,26 @@ namespace OmenMon.Library {
 
             // What the file now holds is what the next save compares against
             ScalarsLoaded = scalarsSaved;
+            GraphicsProfileActiveLoaded = graphicsActiveSaved;
             TakeEntrySnapshots();
 
+        }
+
+        // Saves the Active attribute of <GraphicsProfiles> if it changed in this session
+        // (see SaveScalars()); "" removes it. Returns the value as saved.
+        private static string SaveGraphicsProfileActive(XmlDocument xml, bool fromFile) {
+            string value = GraphicsProfileActive ?? "";
+            string loaded = GraphicsProfileActiveLoaded == null || !fromFile ? "" : GraphicsProfileActiveLoaded;
+            if(value == loaded)
+                return value;
+            XmlElement element = xml.SelectSingleNode(XmlPrefixGraphicsProfiles.TrimEnd('/')) as XmlElement;
+            if(value.Length > 0) {
+                if(element == null)
+                    element = (XmlElement) SetPath(xml, XmlPrefixGraphicsProfiles);
+                element.SetAttribute(XmlAttrGraphicsProfilesActive, value);
+            } else if(element != null)
+                element.RemoveAttribute(XmlAttrGraphicsProfilesActive);
+            return value;
         }
 
         // A scalar setting: where it is saved, and its value as saved
@@ -1305,8 +1387,10 @@ namespace OmenMon.Library {
                 SnapshotSensors = EntrySnapshot(TemperatureSensor, LoadedSensors,
                     (name, sensor) => BuildSensor(xml, name, sensor));
                 SnapshotModels = EntrySnapshot(Models, LoadedModels, (id, p) => BuildModel(xml, p));
+                SnapshotGraphicsProfiles = EntrySnapshot(GraphicsProfiles, LoadedGraphicsProfiles,
+                    (name, profile) => BuildGraphicsProfile(xml, name, profile));
             } catch {
-                SnapshotColorPresets = SnapshotFanPrograms = SnapshotSensors = SnapshotModels = null;
+                SnapshotColorPresets = SnapshotFanPrograms = SnapshotSensors = SnapshotModels = SnapshotGraphicsProfiles = null;
             }
         }
 
@@ -1335,6 +1419,22 @@ namespace OmenMon.Library {
 
         private static string KeyOfModel(XmlElement node) {
             return node.GetAttribute(XmlAttrModelProductId);
+        }
+
+        private static string KeyOfGraphicsProfile(XmlElement node) {
+            return node.GetAttribute(XmlAttrGraphicsProfileName);
+        }
+
+        // Builds a graphics app profile element
+        private static XmlElement BuildGraphicsProfile(XmlDocument xml, string name, GraphicsProfile profile) {
+            XmlElement node = xml.CreateElement(XmlElementGraphicsProfile);
+            node.SetAttribute(XmlAttrGraphicsProfileName, name);
+            foreach(GraphicsProfileApp app in profile.Apps) {
+                XmlElement element = (XmlElement) node.AppendChild(xml.CreateElement(XmlElementGraphicsApp));
+                element.SetAttribute(XmlAttrGraphicsAppKey, app.Key);
+                element.SetAttribute(XmlAttrGraphicsAppGpu, app.Choice.ToString());
+            }
+            return node;
         }
 
         // Builds a color preset element

@@ -303,6 +303,15 @@ namespace OmenMon.Library {
         public static int EcoPlusRefreshRate = 0;
         public static int EcoPlusRefreshHold = 120;
 
+        // Graphics apps: profiles of per-app GPU preferences, by name (the wanted state;
+        // which apps OmenMon changed and their originals are in OmenMon-Graphics.state),
+        // and the profile last applied ("" = none, or Windows default). Saved as
+        // <GraphicsProfiles Active="Show"><Profile Name="Show"><App Key="C:\...\x.exe"
+        // Gpu="HighPerformance"/></Profile></GraphicsProfiles>.
+        public static SortedList<string, GraphicsProfile> GraphicsProfiles =
+            new SortedList<string, GraphicsProfile>(StringComparer.OrdinalIgnoreCase);
+        public static string GraphicsProfileActive = "";
+
         // Whether closing the window closes the whole application
         public static bool GuiCloseWindowExit = false;
 
@@ -642,6 +651,15 @@ namespace OmenMon.Library {
         private const string XmlElementModeReg          = "ModeReg";
         private const string XmlElementSwitchReg        = "SwitchReg";
 
+        // Graphics app profile XML elements and attributes
+        private const string XmlElementGraphicsProfiles = "GraphicsProfiles";
+        private const string XmlElementGraphicsProfile = "Profile";
+        private const string XmlElementGraphicsApp = "App";
+        private const string XmlAttrGraphicsProfilesActive = "Active";
+        private const string XmlAttrGraphicsProfileName = "Name";
+        private const string XmlAttrGraphicsAppKey = "Key";
+        private const string XmlAttrGraphicsAppGpu = "Gpu";
+
         // Configuration XML node prefixes
         private static string XmlPrefix = AppName + "/" + XmlElementConfig + "/"; // Must end with a slash
         private static string XmlPrefixColorPresets = XmlPrefix + XmlElementColorPresets + "/"; // Slash
@@ -653,6 +671,8 @@ namespace OmenMon.Library {
         private static string XmlPrefixTemperatureSensor = XmlPrefixTemperature + XmlElementTemperatureSensor; // No slash
         private static string XmlPrefixModels = XmlPrefix + XmlElementModels + "/"; // Slash
         private static string XmlPrefixModel = XmlPrefixModels + XmlElementModel; // No slash
+        private static string XmlPrefixGraphicsProfiles = XmlPrefix + XmlElementGraphicsProfiles + "/"; // Slash
+        private static string XmlPrefixGraphicsProfile = XmlPrefixGraphicsProfiles + XmlElementGraphicsProfile; // No slash
 
         // Custom preset location, and where earlier versions saved it by mistake
         private const string XmlPathCustomPreset = "//OmenMon/CustomPreset/"; // Slash

@@ -146,7 +146,7 @@ namespace OmenMon.AppGui {
         // Opens the Power & Efficiency window (power draw and its causes, Eco+)
         private void EventActionPower(object sender, EventArgs e) {
             try {
-                GuiFormPower.ShowWindow(Context.Op?.EcoPlus);
+                GuiFormPower.ShowWindow(Context.Op?.EcoPlus, Context.Op?.GraphicsApps);
             } catch(Exception ex) {
                 MessageBox.Show("Could not open Power & Efficiency: " + ex.Message,
                     Config.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);

@@ -42,10 +42,23 @@ namespace OmenMon.AppGui {
 
         // Eco+ (Power & Efficiency window): battery-only efficiency settings, originals kept
         // in OmenMon-EcoPlus.state next to the executable. Maintained from the GUI timer.
-        internal readonly EcoPlus EcoPlus = new EcoPlus(
-            new WindowsPowerPlan(), new RegistryGpuPreferences(), new DisplayRate(),
-            EcoPlusState.Load(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusState.FileName)),
-            EcoPlusOptions.FromConfig);
+        internal readonly EcoPlus EcoPlus;
+
+        // Graphics apps: per-app GPU preference profiles, originals kept in
+        // OmenMon-Graphics.state next to the executable
+        internal readonly GraphicsApps GraphicsApps;
+
+        // Loads both states and moves the GPU preferences an earlier Eco+ kept into the
+        // graphics state, before either feature changes or saves anything
+        private static GraphicsApps StartGraphics(out EcoPlus eco) {
+            string dir = AppDomain.CurrentDomain.BaseDirectory;
+            EcoPlusState ecoState = EcoPlusState.Load(System.IO.Path.Combine(dir, EcoPlusState.FileName));
+            GraphicsApps graphics = new GraphicsApps(new RegistryGpuPreferences(),
+                GraphicsState.Load(System.IO.Path.Combine(dir, GraphicsState.FileName)));
+            GraphicsMigration.FromEcoPlus(ecoState, graphics.State, out _);   // logged
+            eco = new EcoPlus(new WindowsPowerPlan(), new DisplayRate(), ecoState, EcoPlusOptions.FromConfig);
+            return graphics;
+        }
 
         // Last performance preset applied. Presets can share a BIOS mode (Eco and Quiet
         // both use thermal policy 3), so the reported mode alone cannot tell which one
@@ -93,6 +106,9 @@ namespace OmenMon.AppGui {
 
             // Initialize the parent class reference
             this.Context = context;
+
+            // Eco+ and Graphics apps (no hardware: Windows settings and the registry)
+            this.GraphicsApps = StartGraphics(out this.EcoPlus);
 
             // Initialize the BIOS and the Embedded Controller
             Hw.BiosInit();

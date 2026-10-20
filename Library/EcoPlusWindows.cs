@@ -98,6 +98,15 @@ namespace OmenMon.Library {
 
         public const string KeyPath = @"Software\Microsoft\DirectX\UserGpuPreferences";
 
+        public IList<string> Apps() {
+            try {
+                using(RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath))
+                    return key != null ? key.GetValueNames() : new string[0];
+            } catch {
+                return new string[0];
+            }
+        }
+
         public string Get(string app) {
             try {
                 using(RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath))
@@ -108,22 +117,26 @@ namespace OmenMon.Library {
         }
 
         public void Set(string app, string value) {
+            Refuse();
             using(RegistryKey key = Registry.CurrentUser.CreateSubKey(KeyPath))
                 key.SetValue(app, value, RegistryValueKind.String);
         }
 
         public void Remove(string app) {
+            Refuse();
             using(RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath, true))
                 key?.DeleteValue(app, false);
         }
 
-        // A readable form of a preference value
+        // The tests never write the user's real preferences (see Hw.Isolated)
+        private static void Refuse() {
+            if(Hw.Isolated)
+                throw new InvalidOperationException("GPU preferences are not written from the tests");
+        }
+
+        // A readable form of a preference value (see GpuValue)
         public static string Describe(string value) {
-            if(value == null) return "default";
-            if(value.Contains("GpuPreference=1;")) return "power saving";
-            if(value.Contains("GpuPreference=2;")) return "high performance";
-            if(value.Contains("GpuPreference=0;")) return "let Windows decide";
-            return value;
+            return GpuValue.Describe(value);
         }
 
     }

@@ -13,7 +13,9 @@ using OmenMon.Library;
 
 namespace OmenMon.AppGui {
 
-    // Power & Efficiency window: what draws power right now and why, plus Eco+.
+    // Power & Efficiency window: what draws power right now and why, plus Eco+. The apps
+    // keeping the discrete GPU awake can be added to the active graphics profile as power
+    // saving (Graphics apps keeps their originals; Windows default lives there).
     // Readings run on a worker thread every 3 s (WMI and NVML calls can take a moment);
     // the window only renders them. NVML is read far less often (NvmlSchedule), so the
     // window does not keep the discrete GPU awake. Nothing here reads the EC.
@@ -25,9 +27,10 @@ namespace OmenMon.AppGui {
         private CheckBox ChkEco, ChkRefresh;
         private Label LblEco, LblGpuNote;
         private CheckedListBox LstApps;
-        private Button BtnRelease, BtnRestore, BtnClose;
+        private Button BtnRelease, BtnClose;
 
         private readonly EcoPlus Eco;
+        private readonly GraphicsApps GraphicsApps;
         private Thread Worker;
         private volatile bool ClosingDown;
         private PowerSnapshot Last;
@@ -35,9 +38,9 @@ namespace OmenMon.AppGui {
         private bool Building;
 
         // Shows the window, creating it if needed (one at a time)
-        public static void ShowWindow(EcoPlus eco) {
+        public static void ShowWindow(EcoPlus eco, GraphicsApps graphics) {
             if(instance == null || instance.IsDisposed) {
-                instance = new GuiFormPower(eco);
+                instance = new GuiFormPower(eco, graphics);
                 instance.Show();
             } else {
                 if(instance.WindowState == FormWindowState.Minimized)
@@ -46,8 +49,9 @@ namespace OmenMon.AppGui {
             }
         }
 
-        private GuiFormPower(EcoPlus eco) {
+        private GuiFormPower(EcoPlus eco, GraphicsApps graphics) {
             this.Eco = eco;
+            this.GraphicsApps = graphics;
             BuildUi();
             this.FormClosing += (s, e) => this.ClosingDown = true;
             this.Shown += (s, e) => StartWorker();
@@ -83,21 +87,18 @@ namespace OmenMon.AppGui {
 
             GroupBox grpGpu = new GroupBox { Text = "Apps keeping the discrete GPU awake", Location = new Point(12, 456), Size = new Size(576, 142) };
             LstApps = new CheckedListBox { Location = new Point(12, 22), Size = new Size(552, 58), CheckOnClick = true, IntegralHeight = false };
-            BtnRelease = new Button { Text = "Set checked apps to power saving", Location = new Point(12, 86), Size = new Size(230, 26) };
-            BtnRestore = new Button { Text = "Restore saved preferences", Location = new Point(248, 86), Size = new Size(190, 26) };
+            BtnRelease = new Button { Text = "Add checked apps to the profile as power saving", Location = new Point(12, 86), Size = new Size(300, 26) };
             LblGpuNote = new Label {
-                Text = "Apps pick the change up when they restart. Originals are kept and can be restored.",
+                Text = "Apps pick the change up when they restart. Originals are kept (Windows default puts them back).",
                 Location = new Point(12, 116), Size = new Size(552, 20), ForeColor = SystemColors.GrayText };
             BtnRelease.Click += (s, e) => EventRelease();
-            BtnRestore.Click += (s, e) => EventRestore();
-            grpGpu.Controls.AddRange(new Control[] { LstApps, BtnRelease, BtnRestore, LblGpuNote });
+            grpGpu.Controls.AddRange(new Control[] { LstApps, BtnRelease, LblGpuNote });
 
             BtnClose = new Button { Text = "Close", Location = new Point(498, 606), Size = new Size(90, 26) };
             BtnClose.Click += (s, e) => Close();
 
             this.Controls.AddRange(new Control[] { TxtInfo, grpEco, grpGpu, BtnClose });
             this.Building = false;
-            UpdateRestoreButton();
         }
 
         private void StartWorker() {
@@ -162,35 +163,33 @@ namespace OmenMon.AppGui {
                 what = "On. The refresh rate changes once the power source has been stable for "
                     + Config.EcoPlusRefreshHold + " s.";
             LblEco.Text = what ?? (ChkEco.Checked ? "On." : "Off.");
-            UpdateRestoreButton();
         }
 
+        // Adds the checked apps to the active graphics profile as power saving ("Power
+        // saving", made if none is active) and applies it; restarts nothing
         private void EventRelease() {
             List<string> apps = LstApps.CheckedItems.Cast<AppItem>().Select(i => i.Holder.AppKey).ToList();
-            if(apps.Count == 0)
+            if(apps.Count == 0 || this.GraphicsApps == null)
                 return;
-            int n = 0;
-            try { n = this.Eco?.ReleaseGpu(apps) ?? 0; } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
-            if(this.Eco?.LastError != null)
-                LblGpuNote.Text = n + " app(s) set to power saving; the rest left as they are: " + this.Eco.LastError;
+            GraphicsResult result;
+            GraphicsProfile profile;
+            try {
+                profile = GraphicsProfile.AddApps(Config.GraphicsProfiles, Config.GraphicsProfileActive,
+                    apps, GpuChoice.PowerSaving, this.GraphicsApps.State.Managed);
+                result = this.GraphicsApps.Apply(profile, "Power window");
+            } catch(Exception ex) {
+                LblGpuNote.Text = "Failed: " + ex.Message;
+                return;
+            }
+            if(result.Error == null)
+                Config.GraphicsProfileActive = profile.Name;
+            try { Config.Save(); } catch { }
+            int n = result.Restart.Count;
+            if(result.Error != null)
+                LblGpuNote.Text = n + " app(s) set to power saving; the rest left as they are: " + result.Error;
             else
-                LblGpuNote.Text = n + " app(s) set to power saving. They use the integrated GPU after a restart.";
+                LblGpuNote.Text = n + " app(s) set to power saving in " + profile.Name + ". They use the integrated GPU after a restart.";
             this.Listed.Clear();   // re-list with the new preferences
-            UpdateRestoreButton();
-        }
-
-        private void EventRestore() {
-            int n = 0, skipped = 0;
-            try { if(this.Eco != null) n = this.Eco.RestoreGpu(out skipped); } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
-            LblGpuNote.Text = n + " preference(s) restored"
-                + (skipped > 0 ? ", " + skipped + " changed since and left as they are" : "")
-                + (this.Eco?.LastError != null ? "; " + this.Eco.LastError : ". Apps pick them up when they restart.");
-            this.Listed.Clear();
-            UpdateRestoreButton();
-        }
-
-        private void UpdateRestoreButton() {
-            BtnRestore.Enabled = this.Eco != null && this.Eco.State.SavedGpu.Count > 0;
         }
 
         private sealed class AppItem {
