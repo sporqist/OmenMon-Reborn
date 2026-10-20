@@ -29,6 +29,12 @@ namespace OmenMon.Tests {
                 if(!f.IsLiteral && !f.IsInitOnly)
                     Saved[f] = f.GetValue(null);
 
+            // The sets of loaded entry keys are readonly: start each test with them empty,
+            // as the application starts
+            foreach(FieldInfo f in typeof(Config).GetFields(BindingFlags.NonPublic | BindingFlags.Static))
+                if(f.IsInitOnly && f.Name.StartsWith("Loaded") && f.GetValue(null) is HashSet<string> set)
+                    set.Clear();
+
             // Load() adds to these in place, so work on copies
             Config.FanProgram = new SortedList<string, FanProgramData>();
             Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
@@ -216,6 +222,35 @@ namespace OmenMon.Tests {
             Config.GuiStayOnTop = false;
             SaveAndRead();
             Assert.Single(Directory.GetFiles(Dir, "OmenMon.xml.unloaded-*.bak"));
+        }
+
+        [Fact]
+        public void Save_AfterALoadThatFailed_FollowingOneThatWorked_RemovesOrReplacesNothing() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Assert.False(Config.LoadFailed);
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+
+            // Loaded again while the file is broken, then fixed by hand
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+            File.WriteAllText(File_, Fixture);
+
+            // The entries still in memory are deleted and changed in the application
+            Config.FanProgram.Remove("Alpha");
+            Config.FanProgram["Beta"].Level[0] = new byte[] { 33, 33 };
+            Config.Models.Remove("8BAC");
+            XmlDocument xml = SaveAndRead();
+
+            Assert.Single(Directory.GetFiles(Dir, "OmenMon.xml.unloaded-*.bak"));
+            Assert.Equal(Program(before, "Alpha")!.OuterXml, Program(xml, "Alpha")!.OuterXml);
+            XmlNodeList beta = xml.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Beta']")!;
+            Assert.Equal(2, beta.Count);
+            Assert.Equal(Program(before, "Beta")!.OuterXml, beta[0]!.OuterXml);
+            Assert.Equal("33", beta[1]!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+            Assert.Equal(Models(before, "8bac")[0]!.OuterXml, Models(xml, "8bac")[0]!.OuterXml);
         }
 
         [Fact]
@@ -424,6 +459,39 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_AfterAFailedLoad_EntriesOfTheFixedFile_AreNotReplaced() {
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+
+            // The user fixes the file: it holds the hand-measured board and a Quiet program
+            File.WriteAllText(File_, ScalarFixture.Replace("<Config>", "<Config><FanPrograms>"
+                + @"<Program Name=""Quiet""><!-- tuned by hand --><FanMode>Default</FanMode><GpuPower>Maximum</GpuPower>"
+                + @"<Level Temperature=""00""><Cpu>22</Cpu><Gpu>25</Gpu></Level></Program></FanPrograms>"
+                + "<Models>" + BrokenModel.Replace("</Model>", "<SwitchReg>244</SwitchReg></Model>") + "</Models>"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+            string measured = Models(before, "8BAC")[0]!.OuterXml, quiet = Program(before, "Quiet")!.OuterXml;
+
+            // Meanwhile the scan is accepted (SaveModel()) and Quiet is made again in the application
+            Config.Models["8BAC"] = new PlatformPreset { ProductId = "8BAC", DisplayName = "Scanned",
+                FanLevelReg0 = 17, FanLevelReg1 = 17, ModeReg = 89, SwitchReg = 244 };
+            Config.FanProgram["Quiet"] = new FanProgramData("Quiet", BiosData.FanMode.Default, BiosData.GpuPowerLevel.Max,
+                new SortedDictionary<byte, byte[]> { [0] = new byte[] { 30, 33 } });
+            XmlDocument xml = SaveAndRead();
+
+            // The file's entries stay as they were, the application's go after them
+            XmlNodeList models = Models(xml, "8BAC");
+            Assert.Equal(2, models.Count);
+            Assert.Equal(measured, models[0]!.OuterXml);
+            Assert.Equal("Scanned", ((XmlElement) models[1]!).GetAttribute("DisplayName"));
+            XmlNodeList programs = xml.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Quiet']")!;
+            Assert.Equal(2, programs.Count);
+            Assert.Equal(quiet, programs[0]!.OuterXml);
+            Assert.Equal("30", programs[1]!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+        }
+
+        [Fact]
         public void Save_BrokenDraftAfterTheLoadedEntry_IsKept() {
             // A revised copy of Alpha pasted below the working one, with a typo
             const string draft = @"<Program Name=""Alpha""><FanMode>Default</FanMode><GpuPower>Medum</GpuPower>"
@@ -448,15 +516,50 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_TwoCopiesThatBothLoad_UpdatesTheOneThatLoaded() {
+            // A revised copy of Alpha pasted below the old one, both valid
+            const string revised = @"<Program Name=""Alpha""><FanMode>Default</FanMode><GpuPower>Medium</GpuPower>"
+                + @"<Level Temperature=""00""><Cpu>25</Cpu><Gpu>28</Gpu></Level></Program>";
+            File.WriteAllText(File_, Fixture.Replace(@"<Program Name=""Broken"">", revised + @"<Program Name=""Broken"">"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+            string first = before.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Alpha']")![0]!.OuterXml;
+            Config.Load();
+            Assert.Equal(25, Config.FanProgram["Alpha"].Level[0][0]); // the last copy loads
+
+            // Changed in the application: the copy that loaded is updated, the first stays
+            Config.FanProgram["Alpha"].Level[60] = new byte[] { 40, 40 };
+            XmlNodeList list = SaveAndRead().SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Alpha']")!;
+            Assert.Equal(2, list.Count);
+            Assert.Equal(first, list[0]!.OuterXml);
+
+            // And the change loads on the next start
+            Config.FanProgram = new SortedList<string, FanProgramData>();
+            Config.Load();
+            Assert.Equal(25, Config.FanProgram["Alpha"].Level[0][0]);
+            Assert.Equal(40, Config.FanProgram["Alpha"].Level[60][0]);
+        }
+
+        [Fact]
         public void Save_SensorsThatDidNotLoad_AreNotReplacedByTheDefaults() {
             // No sensor is set to be used, so loading keeps the defaults
             File.WriteAllText(File_, Fixture.Replace("<Models>",
                 @"<Temperature><Sensor Name=""CPUT"" Source=""EC"" Use=""false"" /><Sensor Name=""BIOS"" Source=""BIOS"" Use=""false"" /></Temperature><Models>"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
             Config.Load();
             Assert.True(Config.TemperatureSensor["CPUT"].Use);
+
+            // A default sensor in use changes in memory: still no default replaces the file's
+            Config.TemperatureSensorData gptm = Config.TemperatureSensor["GPTM"];
+            gptm.Use = false;
+            Config.TemperatureSensor["GPTM"] = gptm;
             XmlDocument xml = SaveAndRead();
             XmlNodeList sensors = xml.SelectNodes("OmenMon/Config/Temperature/Sensor")!;
+            XmlNodeList original = before.SelectNodes("OmenMon/Config/Temperature/Sensor")!;
             Assert.Equal(2, sensors.Count);
+            for(int i = 0; i < original.Count; i++)
+                Assert.Equal(original[i]!.OuterXml, sensors[i]!.OuterXml);
             Assert.All(sensors.Cast<XmlElement>(), s => Assert.Equal("false", s.GetAttribute("Use")));
         }
 
@@ -605,6 +708,24 @@ namespace OmenMon.Tests {
             Assert.Contains("inside Alpha", Program(xml, "Alpha")!.InnerXml);
             Assert.Equal("150", Models(xml, "8bac")[0]!["ModeReg"]!.InnerText);
             Assert.Equal("33", Program(xml, "Beta")!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+        }
+
+        [Fact]
+        public void Save_EntryEditedByHandAfterASave_IsNotReverted() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+
+            // Changed in the application and saved: what the file now holds is the new baseline
+            Config.FanProgram["Beta"].Level[0] = new byte[] { 33, 33 };
+            SaveAndRead();
+
+            // Then Beta is edited by hand while the application runs, and an unrelated setting changes
+            EditFile("FanPrograms/Program[@Name='Beta']/Level[@Temperature='00']/Cpu", "36");
+            EditFile("FanPrograms/Program[@Name='Beta']/Level[@Temperature='00']/Gpu", "38");
+            Config.GuiStayOnTop = !Config.GuiStayOnTop;
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("36", Program(xml, "Beta")!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+            Assert.Equal("38", Program(xml, "Beta")!.SelectSingleNode("Level[@Temperature='00']/Gpu")!.InnerText);
         }
 
         [Fact]
