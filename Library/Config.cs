@@ -957,13 +957,19 @@ namespace OmenMon.Library {
             SetUInt(xml, XmlPrefix + "PresetRefreshRateHigh", (uint) PresetRefreshRateHigh);
             SetUInt(xml, XmlPrefix + "PresetRefreshRateLow", (uint) PresetRefreshRateLow);
 
-            // Temperature sensors
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixTemperature),
-                XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors,
-                node => {
-                    string name; TemperatureSensorData sensor;
-                    return TryParseSensor(node, out name, out sensor) ? BuildSensor(xml, name, sensor) : null; },
-                (name, sensor) => BuildSensor(xml, name, sensor));
+            // Temperature sensors, unless the file has sensors and none of them loaded
+            // (none was set to be used): the defaults in use then must not replace them
+            Func<XmlElement, XmlElement> canonicalSensor = node => {
+                string name; TemperatureSensorData sensor;
+                return TryParseSensor(node, out name, out sensor) ? BuildSensor(xml, name, sensor) : null; };
+            XmlElement sensors = (XmlElement) SetPath(xml, XmlPrefixTemperature);
+            bool sensorsInFile = false;
+            foreach(XmlNode node in sensors.SelectNodes(XmlElementTemperatureSensor))
+                sensorsInFile |= canonicalSensor((XmlElement) node) != null;
+            if(LoadedSensors.Count > 0 || !sensorsInFile)
+                MergeEntries(xml, sensors,
+                    XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors,
+                    canonicalSensor, (name, sensor) => BuildSensor(xml, name, sensor));
 
             // Model database entries
             MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixModels),
@@ -1037,21 +1043,34 @@ namespace OmenMon.Library {
                 List<XmlElement> list;
                 if(existing.TryGetValue(entry.Key, out list)) {
 
-                    // The last element with a key is the one loading used
-                    XmlElement current = list[list.Count - 1];
-                    XmlElement parsed = canonical(current);
-                    if(parsed == null || parsed.OuterXml != fresh.OuterXml)
-                        parent.ReplaceChild(fresh, current);
+                    // Loading skips elements that do not parse and keeps the last one
+                    // that does, so that is the one to update. An element that failed
+                    // to load is never replaced (it may be a hand edit with a typo).
+                    XmlElement current = null, parsed = null;
+                    for(int i = list.Count - 1; i >= 0 && current == null; i--)
+                        if((parsed = canonical(list[i])) != null)
+                            current = list[i];
+
+                    if(current != null && loaded.Contains(entry.Key)) {
+                        if(parsed.OuterXml != fresh.OuterXml)
+                            parent.ReplaceChild(fresh, current);
+                    } else
+
+                        // Nothing with this key loaded from the file: keep what is there
+                        // and add the entry after it, where loading takes it from
+                        parent.InsertAfter(fresh, list[list.Count - 1]);
 
                 } else
                     parent.AppendChild(fresh);
             }
 
-            // Remove only what was loaded and has since been deleted
+            // Remove only what was loaded and has since been deleted, and of that only
+            // the elements that parse (those that do not were never loaded)
             foreach(KeyValuePair<string, List<XmlElement>> pair in existing)
                 if(!present.Contains(pair.Key) && loaded.Contains(pair.Key))
                     foreach(XmlElement element in pair.Value)
-                        parent.RemoveChild(element);
+                        if(canonical(element) != null)
+                            parent.RemoveChild(element);
 
             // The file now holds exactly what is in memory
             loaded.Clear();

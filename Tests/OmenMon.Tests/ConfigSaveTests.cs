@@ -226,6 +226,85 @@ namespace OmenMon.Tests {
                 n => ((XmlElement) n).GetAttribute("ProductId").Equals("8bac", StringComparison.OrdinalIgnoreCase));
         }
 
+        // A board entry with one child missing (no <SwitchReg>), as a hand edit might leave it
+        private const string BrokenModel = @"<Model ProductId=""8BAC"" DisplayName=""Measured""><!-- hand-measured -->"
+            + "<FanLevelReg0>52</FanLevelReg0><FanLevelReg1>53</FanLevelReg1><FanRateReadReg0>46</FanRateReadReg0>"
+            + "<FanRateReadReg1>47</FanRateReadReg1><FanRateWriteReg0>58</FanRateWriteReg0><FanRateWriteReg1>59</FanRateWriteReg1>"
+            + "<FanSpeedReg0>176</FanSpeedReg0><FanSpeedReg1>178</FanSpeedReg1><CountdownReg>99</CountdownReg>"
+            + "<ManualReg>98</ManualReg><ModeReg>149</ModeReg></Model>";
+
+        private static XmlNodeList Models(XmlDocument xml, string id) {
+            return xml.SelectNodes("OmenMon/Config/Models/Model[@ProductId='" + id + "']")!;
+        }
+
+        [Fact]
+        public void Save_ModelThatFailedToLoad_IsNeverReplaced() {
+            File.WriteAllText(File_, Fixture.Replace(@"<Model ProductId=""9999"">", BrokenModel + @"<Model ProductId=""9999"">")
+                .Replace(@"ProductId=""8bac""", @"ProductId=""8BAB"""));
+            Config.Load();
+            Assert.False(Config.Models.ContainsKey("8BAC"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+            string broken = Models(before, "8BAC")[0]!.OuterXml;
+
+            // What SaveModel() does with a scan result
+            PlatformPreset scanned = new PlatformPreset { ProductId = "8BAC", DisplayName = "Scanned",
+                FanLevelReg0 = 17, FanLevelReg1 = 17, ModeReg = 89, SwitchReg = 244 };
+            Config.Models["8BAC"] = scanned;
+            XmlDocument xml = SaveAndRead();
+            XmlNodeList list = Models(xml, "8BAC");
+            Assert.Equal(2, list.Count);
+            Assert.Equal(broken, list[0]!.OuterXml);
+            Assert.Equal("Scanned", ((XmlElement) list[1]!).GetAttribute("DisplayName"));
+
+            // Loading takes the valid one, and saving again leaves the broken one alone
+            Config.Models.Clear();
+            Config.Load();
+            Assert.Equal("Scanned", Config.Models["8BAC"].DisplayName);
+            Config.Models["8BAC"].ModeReg = 90;
+            list = Models(SaveAndRead(), "8BAC");
+            Assert.Equal(2, list.Count);
+            Assert.Equal(broken, list[0]!.OuterXml);
+            Assert.Equal("90", list[1]!["ModeReg"]!.InnerText);
+        }
+
+        [Fact]
+        public void Save_BrokenDraftAfterTheLoadedEntry_IsKept() {
+            // A revised copy of Alpha pasted below the working one, with a typo
+            const string draft = @"<Program Name=""Alpha""><FanMode>Default</FanMode><GpuPower>Medum</GpuPower>"
+                + @"<Level Temperature=""00""><Cpu>25</Cpu><Gpu>28</Gpu></Level></Program>";
+            File.WriteAllText(File_, Fixture.Replace(@"<Program Name=""Broken"">", draft + @"<Program Name=""Broken"">"));
+            Config.Load();
+            Assert.Equal(20, Config.FanProgram["Alpha"].Level[0][0]);
+
+            // Changed in the application: the loaded element is updated, the draft is kept
+            Config.FanProgram["Alpha"].Level[60] = new byte[] { 40, 40 };
+            XmlDocument xml = SaveAndRead();
+            XmlNodeList list = xml.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Alpha']")!;
+            Assert.Equal(2, list.Count);
+            Assert.Equal("40", list[0]!.SelectSingleNode("Level[@Temperature='60']/Cpu")!.InnerText);
+            Assert.Equal("Medum", list[1]!["GpuPower"]!.InnerText);
+
+            // Deleted in the application: only the element that loaded is removed
+            Config.FanProgram.Remove("Alpha");
+            list = SaveAndRead().SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Alpha']")!;
+            Assert.Single(list.Cast<XmlNode>());
+            Assert.Equal("Medum", list[0]!["GpuPower"]!.InnerText);
+        }
+
+        [Fact]
+        public void Save_SensorsThatDidNotLoad_AreNotReplacedByTheDefaults() {
+            // No sensor is set to be used, so loading keeps the defaults
+            File.WriteAllText(File_, Fixture.Replace("<Models>",
+                @"<Temperature><Sensor Name=""CPUT"" Source=""EC"" Use=""false"" /><Sensor Name=""BIOS"" Source=""BIOS"" Use=""false"" /></Temperature><Models>"));
+            Config.Load();
+            Assert.True(Config.TemperatureSensor["CPUT"].Use);
+            XmlDocument xml = SaveAndRead();
+            XmlNodeList sensors = xml.SelectNodes("OmenMon/Config/Temperature/Sensor")!;
+            Assert.Equal(2, sensors.Count);
+            Assert.All(sensors.Cast<XmlElement>(), s => Assert.Equal("false", s.GetAttribute("Use")));
+        }
+
         private static void ResetCustomPreset() {
             Config.CustomPresetFanMode = "Default";
             Config.CustomPresetGpuPower = "Medium";
