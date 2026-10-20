@@ -545,11 +545,21 @@ namespace OmenMon.Tests {
             // No sensor is set to be used, so loading keeps the defaults
             File.WriteAllText(File_, Fixture.Replace("<Models>",
                 @"<Temperature><Sensor Name=""CPUT"" Source=""EC"" Use=""false"" /><Sensor Name=""BIOS"" Source=""BIOS"" Use=""false"" /></Temperature><Models>"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
             Config.Load();
             Assert.True(Config.TemperatureSensor["CPUT"].Use);
+
+            // A default sensor in use changes in memory: still no default replaces the file's
+            Config.TemperatureSensorData gptm = Config.TemperatureSensor["GPTM"];
+            gptm.Use = false;
+            Config.TemperatureSensor["GPTM"] = gptm;
             XmlDocument xml = SaveAndRead();
             XmlNodeList sensors = xml.SelectNodes("OmenMon/Config/Temperature/Sensor")!;
+            XmlNodeList original = before.SelectNodes("OmenMon/Config/Temperature/Sensor")!;
             Assert.Equal(2, sensors.Count);
+            for(int i = 0; i < original.Count; i++)
+                Assert.Equal(original[i]!.OuterXml, sensors[i]!.OuterXml);
             Assert.All(sensors.Cast<XmlElement>(), s => Assert.Equal("false", s.GetAttribute("Use")));
         }
 
