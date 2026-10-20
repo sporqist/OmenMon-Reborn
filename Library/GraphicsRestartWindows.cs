@@ -510,23 +510,31 @@ namespace OmenMon.Library {
 #region Self-test
     // A manual check of the launch route on the real system, for a hardware/UAC test
     // run: needs OmenMon's elevation, touches no hardware. Not reachable from the CLI
-    // or the GUI. It starts notepad.exe through UnelevatedLauncher, logs the new pid
-    // and the elevation of every new Notepad process, waits 3 s and closes those
-    // politely (WM_CLOSE; never ended). Notepad processes that ran before are not
-    // touched. On Windows 11, System32\notepad.exe hands over to the packaged Notepad
-    // and exits, so the new process to look at is that one.
+    // or the GUI. It starts an app (System32\notepad.exe unless another exe is given)
+    // through UnelevatedLauncher, logs the new pid and the elevation of every new
+    // process with that exe's file name, waits 3 s and closes those politely
+    // (WM_CLOSE; never ended). Processes that ran before are not touched. On Windows
+    // 11, System32\notepad.exe hands over to the packaged Notepad and exits, so the
+    // new process to look at is that one; Notepad may also ask to save restored tabs,
+    // so an app without a save prompt (System32\charmap.exe) tests the close better.
     //
     // From an elevated Windows PowerShell 5.1 (it runs on .NET Framework, so it loads
     // the net48 build):
     //   $a = [Reflection.Assembly]::LoadFrom('<repo>\Bin\OmenMon.exe')
     //   $t = $a.GetType('OmenMon.Library.GraphicsRestartSelfTest')
-    //   $m = $t.GetMethod('Run', [Reflection.BindingFlags]'NonPublic, Static')
-    //   $m.Invoke($null, @('C:\Users\maroa\AppData\Local\Temp\graphics-selftest.log'))
+    //   $m = $t.GetMethod('Run', [Reflection.BindingFlags]'NonPublic, Static', $null, [type[]]@([string], [string]), $null)
+    //   $m.Invoke($null, [object[]]@([string]'C:\Users\maroa\AppData\Local\Temp\graphics-selftest.log', 'C:\Windows\System32\charmap.exe'))
+    // (the casts matter: a path from Join-Path is a PSObject, which Invoke cannot pass)
     // Expected: "own token elevated: True", "check: Ready", "launch: Started pid N",
-    // the new Notepad with "elevated False", then "closed".
+    // the new process with "elevated False", the windows asked to close, then "closed
+    // after n s" (up to 20 s).
     internal static class GraphicsRestartSelfTest {
 
         internal static void Run(string logPath) {
+            Run(logPath, null);
+        }
+
+        internal static void Run(string logPath, string exePath) {
             void Log(string text) {
                 try {
                     File.AppendAllText(logPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
@@ -563,9 +571,13 @@ namespace OmenMon.Library {
                 }
                 HashSet<string> old = new HashSet<string>(before.Processes.Select(p => p.Pid + ":" + p.CreationTime));
 
-                string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-                string notepad = Path.Combine(string.IsNullOrEmpty(windows) ? @"C:\Windows" : windows, "System32", "notepad.exe");
-                LaunchResult r = launcher.Start(notepad, null, LaunchPolicy.DirectoryOf(notepad));
+                string exe = exePath;
+                if(string.IsNullOrEmpty(exe)) {
+                    string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                    exe = Path.Combine(string.IsNullOrEmpty(windows) ? @"C:\Windows" : windows, "System32", "notepad.exe");
+                }
+                string name = Path.GetFileName(exe);
+                LaunchResult r = launcher.Start(exe, null, LaunchPolicy.DirectoryOf(exe));
                 Log("launch: " + r);
                 if(r.Status != LaunchStatus.Started)
                     return;
@@ -573,19 +585,28 @@ namespace OmenMon.Library {
                 Thread.Sleep(3000);
                 ProcessSnapshot after = catalog.Snapshot();
                 List<ProcessEntry> fresh = after?.Processes.Where(p => !old.Contains(p.Pid + ":" + p.CreationTime)
-                    && p.ImagePath != null && string.Equals(Path.GetFileName(p.ImagePath), "notepad.exe", StringComparison.OrdinalIgnoreCase)).ToList()
+                    && p.ImagePath != null && string.Equals(Path.GetFileName(p.ImagePath), name, StringComparison.OrdinalIgnoreCase)).ToList()
                     ?? new List<ProcessEntry>();
                 if(fresh.Count == 0)
-                    Log("no new Notepad process (a running one may have opened the window): close it by hand");
+                    Log("no new " + name + " process (a running one may have opened the window): close it by hand");
                 foreach(ProcessEntry p in fresh) {
                     Log("new: " + p + " " + p.ImagePath + (p.Aumid != null ? " [" + p.Aumid + "]" : "")
                         + ", parent " + p.ParentPid + ", session " + p.SessionId
                         + ", elevated " + (p.Elevated?.ToString() ?? "unknown")
                         + ", interactive user " + (p.InteractiveUser?.ToString() ?? "unknown")
                         + ", window " + p.HasVisibleWindow);
+                    // Which windows get WM_CLOSE, and how long the app takes to exit
+                    if(ProcessHandles.MainWindows().TryGetValue(p.Pid, out List<IntPtr> targets))
+                        foreach(IntPtr w in targets) {
+                            char[] title = new char[256];
+                            int n = User32.GetWindowText(w, title, title.Length);
+                            Log("window 0x" + w.ToString("X") + " \"" + new string(title, 0, Math.Max(0, n)) + "\"");
+                        }
+                    Stopwatch watch = Stopwatch.StartNew();
                     bool asked = closer.RequestClose(p);
-                    bool exited = asked && closer.WaitForExit(p, TimeSpan.FromSeconds(5));
-                    Log(p + ": " + (exited ? "closed" : asked ? "asked to close, still running: close it by hand" : "no window to close: close it by hand"));
+                    bool exited = asked && closer.WaitForExit(p, TimeSpan.FromSeconds(20));
+                    Log(p + ": " + (exited ? "closed after " + watch.Elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + " s"
+                        : asked ? "asked to close, still running after 20 s: close it by hand" : "no window to close: close it by hand"));
                 }
             } catch(Exception e) {
                 Log("failed: " + e);
