@@ -264,6 +264,62 @@ namespace OmenMon.Tests {
             Assert.False(File.Exists(File_ + ".tmp"));
         }
 
+        // The scalar settings' values, by field name
+        private static Dictionary<string, object?> Settings() {
+            Dictionary<string, object?> values = new();
+            foreach(FieldInfo f in typeof(Config).GetFields(BindingFlags.Public | BindingFlags.Static))
+                if(!f.IsLiteral && !f.IsInitOnly && (f.FieldType.IsPrimitive || f.FieldType == typeof(string)))
+                    values[f.Name] = f.GetValue(null);
+            return values;
+        }
+
+        [Fact]
+        public void Save_InstalledConfig_ShedsDefaults_MovesCustomPreset_ChangesNothingElse() {
+            // The configuration installed on the 8BAC (2026-10-20), after a save by a774891
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Installed-8BAC.xml"), File_);
+            Config.FanSafetyWarmCurve = "60:30/33,70:40/43,80:60/63"; // the default (TestRig sets "none")
+            Dictionary<string, object?> defaults = Settings();
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+            Config.Load();
+            Assert.False(Config.LoadFailed);
+            Dictionary<string, object?> loaded = Settings();
+            int programs = Config.FanProgram.Count, models = Config.Models.Count;
+
+            XmlDocument after = SaveAndRead();
+
+            // Nothing but scalar defaults and the stray custom preset is gone
+            Assert.Equal(before.SelectNodes("//comment()")!.Count, after.SelectNodes("//comment()")!.Count);
+            foreach(string path in new[] { "OmenMon/Config/FanPrograms/Program", "OmenMon/Config/Models/Model",
+                "OmenMon/Config/Temperature/Sensor", "OmenMon/Config/ColorPresets/Preset" }) {
+                XmlNodeList a = before.SelectNodes(path)!, b = after.SelectNodes(path)!;
+                Assert.Equal(a.Count, b.Count);
+                for(int i = 0; i < a.Count; i++)
+                    Assert.Equal(a[i]!.OuterXml, b[i]!.OuterXml);
+            }
+            Assert.Null(after.SelectSingleNode("OmenMon/n"));
+            Assert.Null(after.SelectSingleNode("OmenMon/CustomPreset")); // all at the defaults
+            foreach(string name in new[] { "FanSafetyFloorCpu", "FanSafetyFloorGpu", "FanSafetyCoolTemperature",
+                "FanOffMaxMinutes", "FanSafetyWarmCurve", "EcRetryLimit", "AcFlickerHoldMs" })
+                Assert.Null(Value(after, name));
+            foreach(string name in new[] { "AutoConfig", "ThermalPanicTemperature", "FanProgramDefault",
+                "FanProgramSharedTemperature", "EcoPlusEnabled", "EcoPlusRefreshRate", "GpuPowerDefault", "GuiStayOnTop" })
+                Assert.Equal(Value(before, name), Value(after, name));
+            Assert.Equal(Value(before, "KeyCustomAction/ExecArgs"), Value(after, "KeyCustomAction/ExecArgs"));
+
+            // Loaded into defaults again, every setting is what it was
+            foreach(KeyValuePair<string, object?> pair in defaults)
+                typeof(Config).GetField(pair.Key)!.SetValue(null, pair.Value);
+            Config.FanProgram = new SortedList<string, FanProgramData>();
+            Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
+            Config.Load();
+            Dictionary<string, object?> reloaded = Settings();
+            foreach(KeyValuePair<string, object?> pair in loaded)
+                Assert.True(Equals(pair.Value, reloaded[pair.Key]), pair.Key + ": " + pair.Value + " -> " + reloaded[pair.Key]);
+            Assert.Equal(programs, Config.FanProgram.Count);
+            Assert.Equal(models, Config.Models.Count);
+        }
+
         [Fact]
         public void Save_ShippedConfig_RoundTripLosesNothing() {
             string root = AppContext.BaseDirectory;
