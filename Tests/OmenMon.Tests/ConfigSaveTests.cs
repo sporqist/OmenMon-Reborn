@@ -236,6 +236,35 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_ReplaceFailsAfterRemovingTheOriginal_KeepsTheNewFile() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Config.EcoPlusEnabled = true;
+
+            // What ReplaceFile() does when it cannot move the new file into place
+            Config.ReplaceFile = (source, destination) => {
+                File.Delete(destination);
+                throw new IOException("Unable to move the replacement file");
+            };
+            Assert.Throws<IOException>(() => Config.SaveCore());
+            XmlDocument xml = new XmlDocument();
+            xml.Load(File_);
+            Assert.Equal("true", Value(xml, "EcoPlusEnabled"));
+            Assert.False(File.Exists(File_ + ".tmp"));
+        }
+
+        [Fact]
+        public void Save_ReplaceFails_KeepsTheOriginal() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Config.EcoPlusEnabled = true;
+            Config.ReplaceFile = (source, destination) => throw new IOException("Sharing violation");
+            Assert.Throws<IOException>(() => Config.SaveCore());
+            Assert.Equal(Fixture, File.ReadAllText(File_));
+            Assert.False(File.Exists(File_ + ".tmp"));
+        }
+
+        [Fact]
         public void Save_ShippedConfig_RoundTripLosesNothing() {
             string root = AppContext.BaseDirectory;
             while(!File.Exists(Path.Combine(root, "OmenMon.xml")))

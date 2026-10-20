@@ -974,12 +974,20 @@ namespace OmenMon.Library {
             // Swap it in
             try {
                 if(File.Exists(FilePath))
-                    File.Replace(tempPath, FilePath, null);
+                    ReplaceFile(tempPath, FilePath);
                 else
                     File.Move(tempPath, FilePath);
             } catch {
-                try { File.Delete(tempPath); } catch { }
+
+                // ReplaceFile() can remove the original and then fail to move the new file
+                // into place: never leave no copy at all
+                if(File.Exists(FilePath)) {
+                    try { File.Delete(tempPath); } catch { }
+                } else {
+                    try { File.Move(tempPath, FilePath); } catch { }
+                }
                 throw;
+
             }
 
             // What the file now holds is what the next save compares against
@@ -1170,6 +1178,9 @@ namespace OmenMon.Library {
                 && group.Name != XmlElementConfig && group.ParentNode is XmlElement)
                 group.ParentNode.RemoveChild(group);
         }
+
+        // Swaps the saved temporary file in for the configuration file (replaceable in tests)
+        internal static Action<string, string> ReplaceFile = (source, destination) => File.Replace(source, destination, null);
 
         // Merges one keyed collection into its parent element (see SaveCore())
         private static void MergeEntries<T>(
