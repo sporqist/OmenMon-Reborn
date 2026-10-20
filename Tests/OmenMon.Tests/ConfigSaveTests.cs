@@ -29,6 +29,12 @@ namespace OmenMon.Tests {
                 if(!f.IsLiteral && !f.IsInitOnly)
                     Saved[f] = f.GetValue(null);
 
+            // The sets of loaded entry keys are readonly: start each test with them empty,
+            // as the application starts
+            foreach(FieldInfo f in typeof(Config).GetFields(BindingFlags.NonPublic | BindingFlags.Static))
+                if(f.IsInitOnly && f.Name.StartsWith("Loaded") && f.GetValue(null) is HashSet<string> set)
+                    set.Clear();
+
             // Load() adds to these in place, so work on copies
             Config.FanProgram = new SortedList<string, FanProgramData>();
             Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
@@ -216,6 +222,35 @@ namespace OmenMon.Tests {
             Config.GuiStayOnTop = false;
             SaveAndRead();
             Assert.Single(Directory.GetFiles(Dir, "OmenMon.xml.unloaded-*.bak"));
+        }
+
+        [Fact]
+        public void Save_AfterALoadThatFailed_FollowingOneThatWorked_RemovesOrReplacesNothing() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Assert.False(Config.LoadFailed);
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+
+            // Loaded again while the file is broken, then fixed by hand
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+            File.WriteAllText(File_, Fixture);
+
+            // The entries still in memory are deleted and changed in the application
+            Config.FanProgram.Remove("Alpha");
+            Config.FanProgram["Beta"].Level[0] = new byte[] { 33, 33 };
+            Config.Models.Remove("8BAC");
+            XmlDocument xml = SaveAndRead();
+
+            Assert.Single(Directory.GetFiles(Dir, "OmenMon.xml.unloaded-*.bak"));
+            Assert.Equal(Program(before, "Alpha")!.OuterXml, Program(xml, "Alpha")!.OuterXml);
+            XmlNodeList beta = xml.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Beta']")!;
+            Assert.Equal(2, beta.Count);
+            Assert.Equal(Program(before, "Beta")!.OuterXml, beta[0]!.OuterXml);
+            Assert.Equal("33", beta[1]!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+            Assert.Equal(Models(before, "8bac")[0]!.OuterXml, Models(xml, "8bac")[0]!.OuterXml);
         }
 
         [Fact]

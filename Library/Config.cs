@@ -177,6 +177,15 @@ namespace OmenMon.Library {
             bool strayCustomPreset = false;
             LoadFailed = false;
 
+            // Nothing from an earlier load counts as loaded until this one reads it: a
+            // load that fails must not let a save remove or replace the file's entries
+            LoadedColorPresets.Clear();
+            LoadedFanPrograms.Clear();
+            LoadedSensors.Clear();
+            LoadedModels.Clear();
+            LoadFailedBackedUp = false;
+            LoadFailedReported = false;
+
             // Proceed only if the file exists
             if(FilePath != "" && File.Exists(FilePath)) {
 
@@ -509,7 +518,6 @@ namespace OmenMon.Library {
                     // Load the color presets
                     SortedDictionary<string, BiosData.ColorTable> ColorPresetXml
                         = new SortedDictionary<string, BiosData.ColorTable>();
-                    LoadedColorPresets.Clear();
                     foreach(XmlNode node in xml.SelectNodes(XmlPrefixColorPreset)) {
                         // Invalid entries are not loaded (but stay in the file)
                         string name;
@@ -559,14 +567,12 @@ namespace OmenMon.Library {
 
                     // Replace the defaults with configured temperature sensors unless none
                     // were configured or not a single sensor was set to actually be used
-                    LoadedSensors.Clear();
                     if(TemperatureSensorXml.Count > 0 && usable) {
                         TemperatureSensor = TemperatureSensorXml;
                         LoadedSensors.UnionWith(sensorsXml);
                     }
 
                     // Load the model database entries
-                    LoadedModels.Clear();
                     foreach(XmlNode node in xml.SelectNodes(XmlPrefixModel)) {
                         OmenMon.Hardware.Platform.PlatformPreset p;
                         if(TryParseModel(node, out p)) {
@@ -576,7 +582,6 @@ namespace OmenMon.Library {
                     }
 
                     // Load the fan programs
-                    LoadedFanPrograms.Clear();
                     foreach(XmlNode node in xml.SelectNodes(XmlPrefixFanProgram)) {
                         // Invalid entries are not loaded (but stay in the file)
                         FanProgramData program;
