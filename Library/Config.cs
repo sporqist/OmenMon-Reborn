@@ -145,6 +145,22 @@ namespace OmenMon.Library {
         private static readonly HashSet<string> LoadedSensors = new HashSet<string>();
         private static readonly HashSet<string> LoadedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Whether the configuration file exists but could not be loaded: the settings in
+        // use are then (mostly) the defaults, and a save must not write them over the file
+        public static bool LoadFailed { get; private set; }
+
+        // Whether the file has been backed up, and the user told, since loading failed
+        private static bool LoadFailedBackedUp;
+        private static bool LoadFailedReported;
+
+        // Each collection entry as it was in memory after loading, or after the last save,
+        // in its saved form (null before Load()). On save, an entry that is unchanged is
+        // left as the file has it, so a hand edit made since then survives.
+        private static Dictionary<string, string> SnapshotColorPresets;
+        private static Dictionary<string, string> SnapshotFanPrograms;
+        private static Dictionary<string, string> SnapshotSensors;
+        private static Dictionary<string, string> SnapshotModels;
+
         // Retrieves an unsigned word-sized value from the XML configuration file
         private static bool GetWord(XmlDocument xml, string node, out ushort value) {
             value = 0;
@@ -158,6 +174,8 @@ namespace OmenMon.Library {
 
         // Loads the configuration data from the XML file
         public static void Load() {
+            bool strayCustomPreset = false;
+            LoadFailed = false;
 
             // Proceed only if the file exists
             if(FilePath != "" && File.Exists(FilePath)) {
@@ -362,21 +380,31 @@ namespace OmenMon.Library {
                     if(TryGetString(xml, XmlPrefix + "FanProgramDefaultAlt", out text))
                         FanProgramDefaultAlt = text;
 
-                    string customFanMode = GetString(xml, "//OmenMon/CustomPreset/Mode");
+                    // Earlier versions saved the custom preset under a stray <OmenMon><n> element
+                    // (see SetPath()); read it from there if it is not where it belongs, and the
+                    // next save moves it
+                    string customPreset = XmlPathCustomPreset;
+                    if(xml.SelectSingleNode(XmlPathCustomPreset.TrimEnd('/')) == null
+                        && xml.SelectSingleNode(XmlPathCustomPresetStray.TrimEnd('/')) != null) {
+                        customPreset = XmlPathCustomPresetStray;
+                        strayCustomPreset = true;
+                    }
+
+                    string customFanMode = GetString(xml, customPreset + "Mode");
                     if(!string.IsNullOrEmpty(customFanMode))
                         CustomPresetFanMode = customFanMode;
 
-                    string customGpuPower = GetString(xml, "//OmenMon/CustomPreset/GpuPower");
+                    string customGpuPower = GetString(xml, customPreset + "GpuPower");
                     if(!string.IsNullOrEmpty(customGpuPower))
                         CustomPresetGpuPower = customGpuPower;
 
-                    if(GetWord(xml, "//OmenMon/CustomPreset/MaxRpm", out value))
+                    if(GetWord(xml, customPreset + "MaxRpm", out value))
                         CustomPresetMaxRpm = value;
 
-                    if(GetWord(xml, "//OmenMon/CustomPreset/Fan0Level", out value) && value <= 100)
+                    if(GetWord(xml, customPreset + "Fan0Level", out value) && value <= 100)
                         CustomPresetCpuLevel = (byte) value;
 
-                    if(GetWord(xml, "//OmenMon/CustomPreset/Fan1Level", out value) && value <= 100)
+                    if(GetWord(xml, customPreset + "Fan1Level", out value) && value <= 100)
                         CustomPresetGpuLevel = (byte) value;
 
                     if(GetBool(xml, XmlPrefix + "FanProgramModeCheckFirst", out flag))
@@ -560,11 +588,22 @@ namespace OmenMon.Library {
 
                 } catch {
 
-                    // Silently ignore any errors
+                    // Carry on with the defaults, but remember that the file did not load:
+                    // saving then keeps a copy and writes only what changes, and the user
+                    // is told (GuiTray, Save())
+                    LoadFailed = true;
 
                 }
 
             }
+
+            // Remember the values as loaded, to save only what changes (see SaveScalars());
+            // a custom preset read from the stray element is saved where it belongs
+            ScalarsLoaded = ScalarSnapshot();
+            if(strayCustomPreset)
+                foreach(string name in CustomPresetValues)
+                    ScalarsLoaded.Remove(XmlPathCustomPreset + name);
+            TakeEntrySnapshots();
 
         }
 
@@ -803,19 +842,28 @@ namespace OmenMon.Library {
             } catch {
 
                 // Show an error message if the settings could not be saved
-                App.Error("ErrConfigSave");
+                App.Error(LoadFailed ? "ErrConfigSave|ErrConfigLoadStill" : "ErrConfigSave");
+                return;
 
+            }
+
+            // Tell the user once that the file did not load and what was saved
+            if(LoadFailed && !LoadFailedReported) {
+                LoadFailedReported = true;
+                App.Error("ErrConfigLoad|ErrConfigLoadSaved");
             }
         }
 
         // Saves the configuration data to the XML file, throwing on failure
         //
-        // The existing file is updated, not regenerated: scalar values are set in place,
-        // and the collections (color presets, fan programs, temperature sensors, models)
-        // are merged by key. An entry is rewritten only if its value changed, new entries
-        // are appended, and an element is removed only if it loaded successfully and has
-        // since been deleted in the application. Comments, unknown elements and entries
-        // that failed to load stay as they are. The file is written to a temporary file
+        // The existing file is updated, not regenerated: scalar values are set in place
+        // if they changed in this session and removed if they are at their defaults
+        // (see SaveScalars()), and the collections (color presets, fan programs,
+        // temperature sensors, models) are merged by key. An entry is rewritten only if
+        // it changed in this session, new entries are appended, and an element is
+        // removed only if it loaded successfully and has since been deleted in the
+        // application. Comments, unknown elements and entries that failed to load stay
+        // as they are. The file is written to a temporary file
         // first and then swapped in, so an interrupted save cannot leave it truncated.
         // An existing file that cannot be parsed is kept as a backup copy before a new
         // one is written from the template.
@@ -827,14 +875,21 @@ namespace OmenMon.Library {
 
             // Create a new XML document
             XmlDocument xml = new XmlDocument();
+            bool fromFile = false;
 
             if(File.Exists(FilePath)) {
                 try {
 
                     // Load the existing configuration file
                     xml.Load(FilePath);
+                    fromFile = true;
 
                 } catch(XmlException) {
+
+                    // A file that never loaded and still does not parse is left for the
+                    // user to fix: there is nothing to write it from
+                    if(LoadFailed)
+                        throw;
 
                     // Keep the unreadable file, then start from the template
                     File.Copy(FilePath, FilePath + ".unreadable-"
@@ -843,131 +898,65 @@ namespace OmenMon.Library {
                     xml.LoadXml(Config.XmlTemplate);
 
                 }
+
+                // The file did not load at the start: keep a copy before the first save
+                // changes it
+                if(fromFile && LoadFailed && !LoadFailedBackedUp) {
+                    File.Copy(FilePath, FilePath + ".unloaded-"
+                        + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".bak", true);
+                    LoadFailedBackedUp = true;
+                }
+
             } else
 
                 // Start with a pre-defined template
                 xml.LoadXml(Config.XmlTemplate);
 
-            // Create or update the configuration values
-            SetBool(xml, XmlPrefix + "AutoConfig", AutoConfig);
-            SetBool(xml, XmlPrefix + "AutoStartup", AutoStartup);
-            SetBool(xml, XmlPrefix + "BiosErrorReporting", BiosErrorReporting);
-            SetBool(xml, XmlPrefix + "BiosHeartbeatPauseOnBattery", BiosHeartbeatPauseOnBattery);
-            SetBool(xml, XmlPrefix + "BatteryGlitchGuard", BatteryGlitchGuard);
-            SetUInt(xml, XmlPrefix + "BatteryGlitchDropPercent", (uint) BatteryGlitchDropPercent);
-            SetUInt(xml, XmlPrefix + "BatteryGlitchWindowMs",   (uint) BatteryGlitchWindowMs);
-            SetUInt(xml, XmlPrefix + "BatteryGlitchHoldMs",     (uint) BatteryGlitchHoldMs);
-            SetBool(xml, XmlPrefix + "BatteryGlitchGuardOnBattery", BatteryGlitchGuardOnBattery);
-            SetBool(xml, XmlPrefix + "BatteryGlitchGuardDisableTimeout", BatteryGlitchGuardDisableTimeout);
-            SetBool(xml, XmlPrefix + "BatteryGlitchGuardHoldAlways", BatteryGlitchGuardHoldAlways);
-            SetBool(xml, XmlPrefix + "DisplayOffKeepAwake", DisplayOffKeepAwake);
-            SetBool(xml, XmlPrefix + "FanDataPipeServer", FanDataPipeServer);
-            SetBool(xml, XmlPrefix + "AcFlickerGuard", AcFlickerGuard);
-            SetUInt(xml, XmlPrefix + "AcFlickerHoldMs", (uint) AcFlickerHoldMs);
-            SetUInt(xml, XmlPrefix + "AcFlickerConfirmSamples", (uint) AcFlickerConfirmSamples);
-            SetUInt(xml, XmlPrefix + "AcFlickerConfirmIntervalMs", (uint) AcFlickerConfirmIntervalMs);
-            SetUInt(xml, XmlPrefix + "AcFlickerMaxDeferralMs", (uint) AcFlickerMaxDeferralMs);
-            SetBool(xml, XmlPrefix + "AcFlickerPassivePoll", AcFlickerPassivePoll);
-            SetBool(xml, XmlPrefix + "ThermalPanicEnabled", ThermalPanicEnabled);
-            SetUInt(xml, XmlPrefix + "ThermalPanicTemperature", ThermalPanicTemperature);
-            SetUInt(xml, XmlPrefix + "ThermalPanicHysteresis", ThermalPanicHysteresis);
-            SetBool(xml, XmlPrefix + "TemperatureUseFahrenheit", TemperatureUseFahrenheit);
-
-            // Save custom preset parameters directly inside OmenMon.xml
-            SetString(xml, "//OmenMon/CustomPreset/Mode", CustomPresetFanMode);
-            SetString(xml, "//OmenMon/CustomPreset/GpuPower", CustomPresetGpuPower);
-            SetUInt(xml, "//OmenMon/CustomPreset/MaxRpm", (uint) CustomPresetMaxRpm);
-            SetUInt(xml, "//OmenMon/CustomPreset/Fan0Level", CustomPresetCpuLevel);
-            SetUInt(xml, "//OmenMon/CustomPreset/Fan1Level", CustomPresetGpuLevel);
+            // Scalar settings: only what changed (see SaveScalars()); starting from the
+            // template, all that differs from the defaults, and all collection entries
+            Dictionary<string, string> scalarsSaved = SaveScalars(xml, fromFile, fromFile && !LoadFailed);
+            RemoveStrayCustomPreset(xml);
 
             // Color presets
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixColorPresets),
+            MergeEntries(xml, XmlPrefixColorPresets,
                 XmlElementColorPreset, KeyOfColorPreset, ColorPreset, LoadedColorPresets,
+                fromFile ? SnapshotColorPresets : null,
                 node => {
                     string name; BiosData.ColorTable table;
                     return TryParseColorPreset(node, out name, out table) ? BuildColorPreset(xml, name, table) : null; },
                 (name, table) => BuildColorPreset(xml, name, table));
 
-            // Continue with the configuration values
-            SetUInt(xml, XmlPrefix + "EcFailLimit", (uint) EcFailLimit);
-            SetUInt(xml, XmlPrefix + "EcMonInterval", (uint) EcMonInterval);
-            SetUInt(xml, XmlPrefix + "EcMutexTimeout", (uint) EcMutexTimeout);
-            SetUInt(xml, XmlPrefix + "EcRetryLimit", (uint) EcRetryLimit);
-            SetUInt(xml, XmlPrefix + "EcWaitLimit", (uint) EcWaitLimit);
-            SetUInt(xml, XmlPrefix + "EcWaitSpinCount", (uint) EcWaitSpinCount);
-            SetUInt(xml, XmlPrefix + "EcWaitYieldCount", (uint) EcWaitYieldCount);
-            SetBool(xml, XmlPrefix + "FanCountdownExtendAlways", FanCountdownExtendAlways);
-            SetUInt(xml, XmlPrefix + "FanCountdownExtendInterval", (uint) FanCountdownExtendInterval);
-            SetUInt(xml, XmlPrefix + "FanCountdownExtendThreshold", (uint) FanCountdownExtendThreshold);
-            SetUInt(xml, XmlPrefix + "FanLevelMax", (uint) FanLevelMax);
-            SetUInt(xml, XmlPrefix + "FanLevelMin", (uint) FanLevelMin);
-            SetUInt(xml, XmlPrefix + "FanSafetyFloorCpu", FanSafetyFloorCpu);
-            SetUInt(xml, XmlPrefix + "FanSafetyFloorGpu", FanSafetyFloorGpu);
-            SetUInt(xml, XmlPrefix + "FanSafetyCoolTemperature", (uint) FanSafetyCoolTemperature);
-            SetUInt(xml, XmlPrefix + "FanOffMaxMinutes", (uint) FanOffMaxMinutes);
-            SetString(xml, XmlPrefix + "FanSafetyWarmCurve", FanSafetyWarmCurve);
-            SetBool(xml, XmlPrefix + "FanLevelNeedManual", FanLevelNeedManual);
-            SetBool(xml, XmlPrefix + "FanLevelUseEc", FanLevelUseEc);
-            SetString(xml, XmlPrefix + "FanProgramDefault", FanProgramDefault);
-            SetString(xml, XmlPrefix + "FanProgramDefaultAlt", FanProgramDefaultAlt);
-            SetBool(xml, XmlPrefix + "FanProgramModeCheckFirst", FanProgramModeCheckFirst);
-            SetBool(xml, XmlPrefix + "FanProgramSharedTemperature", FanProgramSharedTemperature);
-            SetBool(xml, XmlPrefix + "FanProgramSuspend", FanProgramSuspend);
-
             // Fan programs
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixFanPrograms),
+            MergeEntries(xml, XmlPrefixFanPrograms,
                 XmlElementFanProgram, KeyOfFanProgram, FanProgram, LoadedFanPrograms,
+                fromFile ? SnapshotFanPrograms : null,
                 node => {
                     FanProgramData program;
                     return TryParseFanProgram(node, out program) ? BuildFanProgram(xml, program.Name, program) : null; },
                 (name, program) => BuildFanProgram(xml, name, program));
 
-            // Continue with the configuration values
-            SetString(xml, XmlPrefix + "GpuPowerDefault", GpuPowerDefault);
-            SetUInt(xml, XmlPrefix + "GpuPowerSetInterval", (uint) GpuPowerSetInterval);
-            SetBool(xml, XmlPrefix + "EcoPlusEnabled", EcoPlusEnabled);
-            SetUInt(xml, XmlPrefix + "EcoPlusRefreshRate", (uint) EcoPlusRefreshRate);
-            SetUInt(xml, XmlPrefix + "EcoPlusRefreshHold", (uint) EcoPlusRefreshHold);
-            SetBool(xml, XmlPrefix + "GuiCloseWindowExit", GuiCloseWindowExit);
-            SetBool(xml, XmlPrefix + "GuiDpiChangeResize", GuiDpiChangeResize);
-            SetBool(xml, XmlPrefix + "GuiDynamicIcon", GuiDynamicIcon);
-            SetBool(xml, XmlPrefix + "GuiDynamicIconHasBackground", GuiDynamicIconHasBackground);
-            SetBool(xml, XmlPrefix + "GuiStayOnTop", GuiStayOnTop);
-            SetUInt(xml, XmlPrefix + "GuiSysInfoFontSize", (uint) GuiSysInfoFontSize);
-            SetUInt(xml, XmlPrefix + "GuiTipDuration", (uint) GuiTipDuration);
-            SetBool(xml, XmlPrefixKeyCustomAction + "Enabled", KeyCustomActionEnabled);
-            SetString(xml, XmlPrefixKeyCustomAction + "ExecCmd", KeyCustomActionExecCmd);
-            SetString(xml, XmlPrefixKeyCustomAction + "ExecArgs", KeyCustomActionExecArgs);
-            SetBool(xml, XmlPrefixKeyCustomAction + "Minimized", KeyCustomActionMinimized);
-            SetBool(xml, XmlPrefix + "KeyToggleColorPreset", KeyToggleColorPreset);
-            SetBool(xml, XmlPrefix + "KeyToggleColorPresetSilent", KeyToggleColorPresetSilent);
-            SetBool(xml, XmlPrefix + "KeyToggleFanProgram", KeyToggleFanProgram);
-            SetBool(xml, XmlPrefix + "KeyToggleFanProgramCycleAll", KeyToggleFanProgramCycleAll);
-            SetBool(xml, XmlPrefix + "KeyToggleFanProgramShowGuiFirst", KeyToggleFanProgramShowGuiFirst);
-            SetBool(xml, XmlPrefix + "KeyToggleFanProgramSilent", KeyToggleFanProgramSilent);
-            SetUInt(xml, XmlPrefix + "PresetRefreshRateHigh", (uint) PresetRefreshRateHigh);
-            SetUInt(xml, XmlPrefix + "PresetRefreshRateLow", (uint) PresetRefreshRateLow);
-
-            // Temperature sensors
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixTemperature),
-                XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors,
-                node => {
-                    string name; TemperatureSensorData sensor;
-                    return TryParseSensor(node, out name, out sensor) ? BuildSensor(xml, name, sensor) : null; },
-                (name, sensor) => BuildSensor(xml, name, sensor));
+            // Temperature sensors, unless the file has sensors and none of them loaded
+            // (none was set to be used): the defaults in use then must not replace them
+            Func<XmlElement, XmlElement> canonicalSensor = node => {
+                string name; TemperatureSensorData sensor;
+                return TryParseSensor(node, out name, out sensor) ? BuildSensor(xml, name, sensor) : null; };
+            bool sensorsInFile = false;
+            foreach(XmlNode node in xml.SelectNodes(XmlPrefixTemperatureSensor))
+                sensorsInFile |= canonicalSensor((XmlElement) node) != null;
+            if(LoadedSensors.Count > 0 || !sensorsInFile)
+                MergeEntries(xml, XmlPrefixTemperature,
+                    XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors,
+                    fromFile ? SnapshotSensors : null,
+                    canonicalSensor, (name, sensor) => BuildSensor(xml, name, sensor));
 
             // Model database entries
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixModels),
+            MergeEntries(xml, XmlPrefixModels,
                 XmlElementModel, KeyOfModel, Models, LoadedModels,
+                fromFile ? SnapshotModels : null,
                 node => {
                     OmenMon.Hardware.Platform.PlatformPreset p;
                     return TryParseModel(node, out p) ? BuildModel(xml, p) : null; },
                 (id, p) => BuildModel(xml, p));
-
-            // The remaining configuration values
-            SetUInt(xml, XmlPrefix + "UpdateIconInterval", (uint) UpdateIconInterval);
-            SetUInt(xml, XmlPrefix + "UpdateMonitorInterval", (uint) UpdateMonitorInterval);
-            SetUInt(xml, XmlPrefix + "UpdateProgramInterval", (uint) UpdateProgramInterval);
 
             // Write to a temporary file next to the configuration file
             string tempPath = FilePath + ".tmp";
@@ -985,29 +974,234 @@ namespace OmenMon.Library {
             // Swap it in
             try {
                 if(File.Exists(FilePath))
-                    File.Replace(tempPath, FilePath, null);
+                    ReplaceFile(tempPath, FilePath);
                 else
                     File.Move(tempPath, FilePath);
             } catch {
-                try { File.Delete(tempPath); } catch { }
+
+                // ReplaceFile() can remove the original and then fail to move the new file
+                // into place: never leave no copy at all
+                if(File.Exists(FilePath)) {
+                    try { File.Delete(tempPath); } catch { }
+                } else {
+                    try { File.Move(tempPath, FilePath); } catch { }
+                }
                 throw;
+
             }
+
+            // What the file now holds is what the next save compares against
+            ScalarsLoaded = scalarsSaved;
+            TakeEntrySnapshots();
 
         }
 
+        // A scalar setting: where it is saved, and its value as saved
+        private struct Scalar {
+            public readonly string Path;
+            public readonly Func<string> Value;
+            public Scalar(string path, Func<string> value) { Path = path; Value = value; }
+        }
+
+        private static Scalar ScalarBool(string path, Func<bool> value) {
+            return new Scalar(path, () => value() ? XmlSaveBoolTrue : XmlSaveBoolFalse);
+        }
+
+        private static Scalar ScalarUInt(string path, Func<uint> value) {
+            return new Scalar(path, () => Conv.GetString(value(), 1, 10));
+        }
+
+        private static Scalar ScalarString(string path, Func<string> value) {
+            return new Scalar(path, () => value() ?? "");
+        }
+
+        // Every scalar setting in the order it is saved, and the built-in defaults: set
+        // up by the static constructor, which runs after all the field initializers, so
+        // the defaults are the values the code starts with
+        private static readonly Scalar[] Scalars;
+        private static readonly Dictionary<string, string> ScalarDefaults = new Dictionary<string, string>();
+
+        // Each scalar's value as loaded, or as the last save left it (null before Load())
+        private static Dictionary<string, string> ScalarsLoaded;
+
+        static Config() {
+            Scalars = new Scalar[] {
+                ScalarBool(XmlPrefix + "AutoConfig", () => AutoConfig),
+                ScalarBool(XmlPrefix + "AutoStartup", () => AutoStartup),
+                ScalarBool(XmlPrefix + "BiosErrorReporting", () => BiosErrorReporting),
+                ScalarBool(XmlPrefix + "BiosHeartbeatPauseOnBattery", () => BiosHeartbeatPauseOnBattery),
+                ScalarBool(XmlPrefix + "BatteryGlitchGuard", () => BatteryGlitchGuard),
+                ScalarUInt(XmlPrefix + "BatteryGlitchDropPercent", () => (uint) BatteryGlitchDropPercent),
+                ScalarUInt(XmlPrefix + "BatteryGlitchWindowMs", () => (uint) BatteryGlitchWindowMs),
+                ScalarUInt(XmlPrefix + "BatteryGlitchHoldMs", () => (uint) BatteryGlitchHoldMs),
+                ScalarBool(XmlPrefix + "BatteryGlitchGuardOnBattery", () => BatteryGlitchGuardOnBattery),
+                ScalarBool(XmlPrefix + "BatteryGlitchGuardDisableTimeout", () => BatteryGlitchGuardDisableTimeout),
+                ScalarBool(XmlPrefix + "BatteryGlitchGuardHoldAlways", () => BatteryGlitchGuardHoldAlways),
+                ScalarBool(XmlPrefix + "DisplayOffKeepAwake", () => DisplayOffKeepAwake),
+                ScalarBool(XmlPrefix + "FanDataPipeServer", () => FanDataPipeServer),
+                ScalarBool(XmlPrefix + "AcFlickerGuard", () => AcFlickerGuard),
+                ScalarUInt(XmlPrefix + "AcFlickerHoldMs", () => (uint) AcFlickerHoldMs),
+                ScalarUInt(XmlPrefix + "AcFlickerConfirmSamples", () => (uint) AcFlickerConfirmSamples),
+                ScalarUInt(XmlPrefix + "AcFlickerConfirmIntervalMs", () => (uint) AcFlickerConfirmIntervalMs),
+                ScalarUInt(XmlPrefix + "AcFlickerMaxDeferralMs", () => (uint) AcFlickerMaxDeferralMs),
+                ScalarBool(XmlPrefix + "AcFlickerPassivePoll", () => AcFlickerPassivePoll),
+                ScalarBool(XmlPrefix + "ThermalPanicEnabled", () => ThermalPanicEnabled),
+                ScalarUInt(XmlPrefix + "ThermalPanicTemperature", () => (uint) ThermalPanicTemperature),
+                ScalarUInt(XmlPrefix + "ThermalPanicHysteresis", () => (uint) ThermalPanicHysteresis),
+                ScalarBool(XmlPrefix + "TemperatureUseFahrenheit", () => TemperatureUseFahrenheit),
+                ScalarString(XmlPathCustomPreset + "Mode", () => CustomPresetFanMode),
+                ScalarString(XmlPathCustomPreset + "GpuPower", () => CustomPresetGpuPower),
+                ScalarUInt(XmlPathCustomPreset + "MaxRpm", () => (uint) CustomPresetMaxRpm),
+                ScalarUInt(XmlPathCustomPreset + "Fan0Level", () => (uint) CustomPresetCpuLevel),
+                ScalarUInt(XmlPathCustomPreset + "Fan1Level", () => (uint) CustomPresetGpuLevel),
+                ScalarUInt(XmlPrefix + "EcFailLimit", () => (uint) EcFailLimit),
+                ScalarUInt(XmlPrefix + "EcMonInterval", () => (uint) EcMonInterval),
+                ScalarUInt(XmlPrefix + "EcMutexTimeout", () => (uint) EcMutexTimeout),
+                ScalarUInt(XmlPrefix + "EcRetryLimit", () => (uint) EcRetryLimit),
+                ScalarUInt(XmlPrefix + "EcWaitLimit", () => (uint) EcWaitLimit),
+                ScalarUInt(XmlPrefix + "EcWaitSpinCount", () => (uint) EcWaitSpinCount),
+                ScalarUInt(XmlPrefix + "EcWaitYieldCount", () => (uint) EcWaitYieldCount),
+                ScalarBool(XmlPrefix + "FanCountdownExtendAlways", () => FanCountdownExtendAlways),
+                ScalarUInt(XmlPrefix + "FanCountdownExtendInterval", () => (uint) FanCountdownExtendInterval),
+                ScalarUInt(XmlPrefix + "FanCountdownExtendThreshold", () => (uint) FanCountdownExtendThreshold),
+                ScalarUInt(XmlPrefix + "FanLevelMax", () => (uint) FanLevelMax),
+                ScalarUInt(XmlPrefix + "FanLevelMin", () => (uint) FanLevelMin),
+                ScalarUInt(XmlPrefix + "FanSafetyFloorCpu", () => (uint) FanSafetyFloorCpu),
+                ScalarUInt(XmlPrefix + "FanSafetyFloorGpu", () => (uint) FanSafetyFloorGpu),
+                ScalarUInt(XmlPrefix + "FanSafetyCoolTemperature", () => (uint) FanSafetyCoolTemperature),
+                ScalarUInt(XmlPrefix + "FanOffMaxMinutes", () => (uint) FanOffMaxMinutes),
+                ScalarString(XmlPrefix + "FanSafetyWarmCurve", () => FanSafetyWarmCurve),
+                ScalarBool(XmlPrefix + "FanLevelNeedManual", () => FanLevelNeedManual),
+                ScalarBool(XmlPrefix + "FanLevelUseEc", () => FanLevelUseEc),
+                ScalarString(XmlPrefix + "FanProgramDefault", () => FanProgramDefault),
+                ScalarString(XmlPrefix + "FanProgramDefaultAlt", () => FanProgramDefaultAlt),
+                ScalarBool(XmlPrefix + "FanProgramModeCheckFirst", () => FanProgramModeCheckFirst),
+                ScalarBool(XmlPrefix + "FanProgramSharedTemperature", () => FanProgramSharedTemperature),
+                ScalarBool(XmlPrefix + "FanProgramSuspend", () => FanProgramSuspend),
+                ScalarString(XmlPrefix + "GpuPowerDefault", () => GpuPowerDefault),
+                ScalarUInt(XmlPrefix + "GpuPowerSetInterval", () => (uint) GpuPowerSetInterval),
+                ScalarBool(XmlPrefix + "EcoPlusEnabled", () => EcoPlusEnabled),
+                ScalarUInt(XmlPrefix + "EcoPlusRefreshRate", () => (uint) EcoPlusRefreshRate),
+                ScalarUInt(XmlPrefix + "EcoPlusRefreshHold", () => (uint) EcoPlusRefreshHold),
+                ScalarBool(XmlPrefix + "GuiCloseWindowExit", () => GuiCloseWindowExit),
+                ScalarBool(XmlPrefix + "GuiDpiChangeResize", () => GuiDpiChangeResize),
+                ScalarBool(XmlPrefix + "GuiDynamicIcon", () => GuiDynamicIcon),
+                ScalarBool(XmlPrefix + "GuiDynamicIconHasBackground", () => GuiDynamicIconHasBackground),
+                ScalarBool(XmlPrefix + "GuiStayOnTop", () => GuiStayOnTop),
+                ScalarUInt(XmlPrefix + "GuiSysInfoFontSize", () => (uint) GuiSysInfoFontSize),
+                ScalarUInt(XmlPrefix + "GuiTipDuration", () => (uint) GuiTipDuration),
+                ScalarBool(XmlPrefixKeyCustomAction + "Enabled", () => KeyCustomActionEnabled),
+                ScalarString(XmlPrefixKeyCustomAction + "ExecCmd", () => KeyCustomActionExecCmd),
+                ScalarString(XmlPrefixKeyCustomAction + "ExecArgs", () => KeyCustomActionExecArgs),
+                ScalarBool(XmlPrefixKeyCustomAction + "Minimized", () => KeyCustomActionMinimized),
+                ScalarBool(XmlPrefix + "KeyToggleColorPreset", () => KeyToggleColorPreset),
+                ScalarBool(XmlPrefix + "KeyToggleColorPresetSilent", () => KeyToggleColorPresetSilent),
+                ScalarBool(XmlPrefix + "KeyToggleFanProgram", () => KeyToggleFanProgram),
+                ScalarBool(XmlPrefix + "KeyToggleFanProgramCycleAll", () => KeyToggleFanProgramCycleAll),
+                ScalarBool(XmlPrefix + "KeyToggleFanProgramShowGuiFirst", () => KeyToggleFanProgramShowGuiFirst),
+                ScalarBool(XmlPrefix + "KeyToggleFanProgramSilent", () => KeyToggleFanProgramSilent),
+                ScalarUInt(XmlPrefix + "PresetRefreshRateHigh", () => (uint) PresetRefreshRateHigh),
+                ScalarUInt(XmlPrefix + "PresetRefreshRateLow", () => (uint) PresetRefreshRateLow),
+                ScalarUInt(XmlPrefix + "UpdateIconInterval", () => (uint) UpdateIconInterval),
+                ScalarUInt(XmlPrefix + "UpdateMonitorInterval", () => (uint) UpdateMonitorInterval),
+                ScalarUInt(XmlPrefix + "UpdateProgramInterval", () => (uint) UpdateProgramInterval) };
+            foreach(Scalar scalar in Scalars)
+                ScalarDefaults[scalar.Path] = scalar.Value();
+        }
+
+        // Takes the current values of all scalar settings
+        private static Dictionary<string, string> ScalarSnapshot() {
+            Dictionary<string, string> snapshot = new Dictionary<string, string>();
+            foreach(Scalar scalar in Scalars)
+                snapshot[scalar.Path] = scalar.Value();
+            return snapshot;
+        }
+
+        // Saves the scalar settings. Only what changed in this session is written, so a
+        // hand edit made to the file since it was loaded survives, and only values that
+        // differ from the defaults are kept: a value changed back to its default is
+        // removed, and so is one the file holds at its default, so that a later change
+        // of a default reaches the user (not if the file did not load: removeDefaults is
+        // then false). Returns the values as saved.
+        private static Dictionary<string, string> SaveScalars(XmlDocument xml, bool fromFile, bool removeDefaults) {
+            Dictionary<string, string> saved = new Dictionary<string, string>();
+            foreach(Scalar scalar in Scalars) {
+                string value = scalar.Value(), fallback = ScalarDefaults[scalar.Path], loaded;
+                saved[scalar.Path] = value;
+
+                // Before any Load(), or when starting from the template, compare against
+                // the defaults; a value that was not loaded from its own path has no
+                // entry and is always saved
+                if(ScalarsLoaded == null || !fromFile)
+                    loaded = fallback;
+                else if(!ScalarsLoaded.TryGetValue(scalar.Path, out loaded))
+                    loaded = null;
+
+                XmlNodeList nodes = xml.SelectNodes(scalar.Path);
+                XmlElement single = nodes.Count == 1 ? nodes[0] as XmlElement : null;
+                if(value != loaded) {
+
+                    // Changed in this session
+                    if(value != fallback)
+                        SetString(xml, scalar.Path, value);
+                    else if(single != null && IsPlainValue(single))
+                        RemoveScalar(single);
+                    else if(nodes.Count > 0)
+                        SetString(xml, scalar.Path, value);
+
+                } else if(removeDefaults && single != null && IsPlainValue(single) && single.InnerText == fallback)
+
+                    // Unchanged, and the file holds the default
+                    RemoveScalar(single);
+            }
+            return saved;
+        }
+
+        // Whether an element holds nothing but its value. One with attributes, comments
+        // or child elements is never removed, and neither is one of several elements
+        // with the same name (loading would then take the next one).
+        private static bool IsPlainValue(XmlElement element) {
+            if(element.HasAttributes)
+                return false;
+            foreach(XmlNode child in element.ChildNodes)
+                if(child.NodeType != XmlNodeType.Text)
+                    return false;
+            return true;
+        }
+
+        // Removes a scalar setting element, and its parent if that is now empty
+        // (<CustomPreset>, <KeyCustomAction>), but never <Config> or the root
+        private static void RemoveScalar(XmlElement element) {
+            XmlNode parent = element.ParentNode;
+            parent.RemoveChild(element);
+            if(parent is XmlElement group && !group.HasChildNodes && !group.HasAttributes
+                && group.Name != XmlElementConfig && group.ParentNode is XmlElement)
+                group.ParentNode.RemoveChild(group);
+        }
+
+        // Swaps the saved temporary file in for the configuration file (replaceable in tests)
+        internal static Action<string, string> ReplaceFile = (source, destination) => File.Replace(source, destination, null);
+
         // Merges one keyed collection into its parent element (see SaveCore())
         private static void MergeEntries<T>(
-            XmlDocument xml, XmlElement parent, string elementName,
+            XmlDocument xml, string path, string elementName,
             Func<XmlElement, string> keyOf,
             IEnumerable<KeyValuePair<string, T>> entries,
             HashSet<string> loaded,
+            Dictionary<string, string> snapshot,
             Func<XmlElement, XmlElement> canonical,
             Func<string, T, XmlElement> build) {
 
             // Index the existing elements by key
+            XmlElement parent = xml.SelectSingleNode(path.TrimEnd('/')) as XmlElement;
             Dictionary<string, List<XmlElement>> existing =
                 new Dictionary<string, List<XmlElement>>(loaded.Comparer);
-            foreach(XmlNode child in parent.ChildNodes) {
+            bool inFile = false;
+            List<XmlNode> children = new List<XmlNode>();
+            if(parent != null)
+                foreach(XmlNode child in parent.ChildNodes)
+                    children.Add(child);
+            foreach(XmlNode child in children) {
                 XmlElement element = child as XmlElement;
                 if(element == null || element.Name != elementName)
                     continue;
@@ -1018,36 +1212,106 @@ namespace OmenMon.Library {
                 if(!existing.TryGetValue(key, out list))
                     existing[key] = list = new List<XmlElement>();
                 list.Add(element);
+                inFile |= canonical(element) != null;
             }
 
-            // Update changed entries and append new ones
+            // Find the entries that changed since loading or the last save (all of them
+            // before any Load())
+            List<KeyValuePair<string, XmlElement>> changed = new List<KeyValuePair<string, XmlElement>>();
+            List<KeyValuePair<string, XmlElement>> unchanged = new List<KeyValuePair<string, XmlElement>>();
             HashSet<string> present = new HashSet<string>(loaded.Comparer);
             foreach(KeyValuePair<string, T> entry in entries) {
                 present.Add(entry.Key);
                 XmlElement fresh = build(entry.Key, entry.Value);
+                string before;
+                if(snapshot != null && snapshot.TryGetValue(entry.Key, out before) && before == fresh.OuterXml)
+                    unchanged.Add(new KeyValuePair<string, XmlElement>(entry.Key, fresh));
+                else
+                    changed.Add(new KeyValuePair<string, XmlElement>(entry.Key, fresh));
+            }
+
+            // Loading replaces the defaults of color presets and sensors with what the file
+            // holds, so if it holds none of them yet, the unchanged defaults are written
+            // together with the first change, or they would be gone on the next start
+            if(changed.Count > 0 && loaded.Count == 0 && !inFile)
+                changed.AddRange(unchanged);
+
+            // The parent element is only created if there is something to write
+            if(parent == null && changed.Count > 0)
+                parent = (XmlElement) SetPath(xml, path);
+
+            // Update changed entries and append new ones; unchanged entries are left as
+            // the file has them
+            foreach(KeyValuePair<string, XmlElement> entry in changed) {
+                XmlElement fresh = entry.Value;
                 List<XmlElement> list;
                 if(existing.TryGetValue(entry.Key, out list)) {
 
-                    // The last element with a key is the one loading used
-                    XmlElement current = list[list.Count - 1];
-                    XmlElement parsed = canonical(current);
-                    if(parsed == null || parsed.OuterXml != fresh.OuterXml)
-                        parent.ReplaceChild(fresh, current);
+                    // Loading skips elements that do not parse and keeps the last one
+                    // that does, so that is the one to update. An element that failed
+                    // to load is never replaced (it may be a hand edit with a typo).
+                    XmlElement current = null, parsed = null;
+                    for(int i = list.Count - 1; i >= 0 && current == null; i--)
+                        if((parsed = canonical(list[i])) != null)
+                            current = list[i];
+
+                    if(current != null && loaded.Contains(entry.Key)) {
+                        if(parsed.OuterXml != fresh.OuterXml)
+                            parent.ReplaceChild(fresh, current);
+                    } else
+
+                        // Nothing with this key loaded from the file: keep what is there
+                        // and add the entry after it, where loading takes it from
+                        parent.InsertAfter(fresh, list[list.Count - 1]);
 
                 } else
                     parent.AppendChild(fresh);
             }
 
-            // Remove only what was loaded and has since been deleted
+            // Remove only what was loaded and has since been deleted, and of that only
+            // the elements that parse (those that do not were never loaded)
             foreach(KeyValuePair<string, List<XmlElement>> pair in existing)
                 if(!present.Contains(pair.Key) && loaded.Contains(pair.Key))
                     foreach(XmlElement element in pair.Value)
-                        parent.RemoveChild(element);
+                        if(canonical(element) != null)
+                            parent.RemoveChild(element);
 
-            // The file now holds exactly what is in memory
+            // The file now holds what was written and the unchanged entries that loaded
+            // (an unchanged default that was never written is not in the file)
+            HashSet<string> held = new HashSet<string>(loaded.Comparer);
+            foreach(KeyValuePair<string, XmlElement> entry in changed)
+                held.Add(entry.Key);
+            foreach(KeyValuePair<string, XmlElement> entry in unchanged)
+                if(loaded.Contains(entry.Key))
+                    held.Add(entry.Key);
             loaded.Clear();
-            loaded.UnionWith(present);
+            loaded.UnionWith(held);
 
+        }
+
+        // Records every collection entry in its saved form (see MergeEntries())
+        private static void TakeEntrySnapshots() {
+            try {
+                XmlDocument xml = new XmlDocument();
+                SnapshotColorPresets = EntrySnapshot(ColorPreset, LoadedColorPresets,
+                    (name, table) => BuildColorPreset(xml, name, table));
+                SnapshotFanPrograms = EntrySnapshot(FanProgram, LoadedFanPrograms,
+                    (name, program) => BuildFanProgram(xml, name, program));
+                SnapshotSensors = EntrySnapshot(TemperatureSensor, LoadedSensors,
+                    (name, sensor) => BuildSensor(xml, name, sensor));
+                SnapshotModels = EntrySnapshot(Models, LoadedModels, (id, p) => BuildModel(xml, p));
+            } catch {
+                SnapshotColorPresets = SnapshotFanPrograms = SnapshotSensors = SnapshotModels = null;
+            }
+        }
+
+        private static Dictionary<string, string> EntrySnapshot<T>(
+            IEnumerable<KeyValuePair<string, T>> entries, HashSet<string> loaded,
+            Func<string, T, XmlElement> build) {
+            Dictionary<string, string> snapshot = new Dictionary<string, string>(loaded.Comparer);
+            foreach(KeyValuePair<string, T> entry in entries)
+                snapshot[entry.Key] = build(entry.Key, entry.Value).OuterXml;
+            return snapshot;
         }
 
         // Collection element keys, matching the dictionary keys Load() uses
@@ -1171,13 +1435,27 @@ namespace OmenMon.Library {
             Save();
         }
 
-        // Sets a Boolean flag in the XML configuration file
-        private static bool SetBool(XmlDocument xml, string node, bool value) {
-            try {
-                (SetPath(xml, node)).InnerText = value ? XmlSaveBoolTrue : XmlSaveBoolFalse;
-                return true;
-            } catch {  }
-            return false;
+        // The custom preset values (elements under <CustomPreset>)
+        private static readonly string[] CustomPresetValues = { "Mode", "GpuPower", "MaxRpm", "Fan0Level", "Fan1Level" };
+
+        // Removes the custom preset values that earlier versions saved under a stray
+        // <OmenMon><n> element, now that they are saved where loading reads them; the
+        // elements are removed only once they hold nothing else
+        private static void RemoveStrayCustomPreset(XmlDocument xml) {
+            XmlNode stray = xml.SelectSingleNode(XmlPathCustomPresetStray.TrimEnd('/'));
+            if(stray == null)
+                return;
+            List<XmlNode> values = new List<XmlNode>();
+            foreach(string name in CustomPresetValues)
+                foreach(XmlNode node in stray.SelectNodes(name))
+                    values.Add(node);
+            foreach(XmlNode node in values)
+                stray.RemoveChild(node);
+            XmlNode n = stray.ParentNode;
+            if(!stray.HasChildNodes && ((XmlElement) stray).Attributes.Count == 0)
+                n.RemoveChild(stray);
+            if(!n.HasChildNodes && ((XmlElement) n).Attributes.Count == 0)
+                n.ParentNode.RemoveChild(n);
         }
 
         // Ensures all intermediate nodes exist along an XML search path,
@@ -1186,7 +1464,10 @@ namespace OmenMon.Library {
             XmlNode node;
 
             // Split the path into individual node names
-            string[] nodes = path.Trim('/').Split('/');
+            // Note: the remainder is taken from the trimmed path too; with the untrimmed
+            // one, "//OmenMon/CustomPreset/Mode" continued as "n/CustomPreset/Mode"
+            path = path.Trim('/');
+            string[] nodes = path.Split('/');
 
             // If the next node name is empty, return the parent node
             if(string.IsNullOrEmpty(nodes[0]))
@@ -1212,15 +1493,6 @@ namespace OmenMon.Library {
         private static bool SetString(XmlDocument xml, string node, string value) {
             try {
                 (SetPath(xml, node)).InnerText = value;
-                return true;
-            } catch {  }
-            return false;
-        }
-
-        // Sets an unsigned double word-sized value in the XML configuration file
-        private static bool SetUInt(XmlDocument xml, string node, uint value, int padding = 1, int nbase = 10) {
-            try {
-                (SetPath(xml, node)).InnerText = Conv.GetString(value, padding, nbase);
                 return true;
             } catch {  }
             return false;

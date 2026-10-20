@@ -20,6 +20,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Configuration files the tests load (the installed 8BAC configuration, among others) -->
+  <ItemGroup>
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- Tests run against the net10.0-windows build of the application itself -->
   <ItemGroup>
     <ProjectReference Include="..\..\OmenMon.csproj" />

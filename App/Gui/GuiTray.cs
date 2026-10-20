@@ -197,6 +197,11 @@ namespace OmenMon.AppGui {
             // on the UI thread (issue #98).
             this.Monitor.Start();
 
+            // Tell the user if the configuration file did not load (a balloon tip: a
+            // dialog would hold up an unattended start)
+            if(Config.LoadFailed)
+                ShowBalloonTip(Config.GetError("ErrConfigLoad|ErrConfigLoadDefaults"), Config.AppName, ToolTipIcon.Warning);
+
         }
 
         // Handles component disposal
