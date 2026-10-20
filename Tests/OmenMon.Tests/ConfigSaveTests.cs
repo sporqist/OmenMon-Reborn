@@ -40,6 +40,7 @@ namespace OmenMon.Tests {
             Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
             Config.ColorPreset = new SortedDictionary<string, BiosData.ColorTable>(Config.ColorPreset);
             Config.TemperatureSensor = new Dictionary<string, Config.TemperatureSensorData>(Config.TemperatureSensor);
+            Config.GraphicsProfiles = new SortedList<string, GraphicsProfile>(StringComparer.OrdinalIgnoreCase);
 
             Dir = Path.Combine(Path.GetTempPath(), "omenmon-config-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Dir);
@@ -809,6 +810,181 @@ namespace OmenMon.Tests {
             Assert.NotNull(xml.SelectSingleNode("OmenMon/n/CustomPreset/comment()"));
             Assert.Null(xml.SelectSingleNode("OmenMon/n/CustomPreset/Fan0Level"));
             Assert.Equal("30", xml.SelectSingleNode("OmenMon/CustomPreset/Fan0Level")!.InnerText);
+        }
+
+        // Graphics app profiles: <GraphicsProfiles Active="..."><Profile Name="..."><App Key="..." Gpu="..."/>
+        private const string TouchDesigner = @"C:\Program Files\Derivative\TouchDesigner\bin\TouchDesigner.exe";
+        private const string Terminal = "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App";
+
+        private const string GraphicsFixture = @"<GraphicsProfiles Active=""Show"">
+            <Profile Name=""Show"">
+                <!-- for the LED wall -->
+                <App Key=""C:\Program Files\Derivative\TouchDesigner\bin\TouchDesigner.exe"" Gpu=""HighPerformance"" />
+                <App Key=""Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"" Gpu=""PowerSaving"" />
+            </Profile>
+            <Profile Name=""Bad"">
+                <App Key=""a.exe"" Gpu=""Turbo"" />
+            </Profile>
+        </GraphicsProfiles>
+    </Config>";
+
+        private static string WithGraphics(string profiles = GraphicsFixture) {
+            return Fixture.Replace("    </Config>", "        " + profiles);
+        }
+
+        private static XmlElement? ProfileElement(XmlDocument xml, string name) {
+            return xml.SelectSingleNode("OmenMon/Config/GraphicsProfiles/Profile[@Name='" + name + "']") as XmlElement;
+        }
+
+        private static XmlElement? GraphicsElement(XmlDocument xml) {
+            return xml.SelectSingleNode("OmenMon/Config/GraphicsProfiles") as XmlElement;
+        }
+
+        [Fact]
+        public void GraphicsProfiles_RoundTrip_InTheShapeDesigned() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Assert.Empty(Config.GraphicsProfiles);
+            Assert.Equal("", Config.GraphicsProfileActive);
+            GraphicsProfile show = new GraphicsProfile("Show");
+            show.Set(TouchDesigner, GpuChoice.HighPerformance);
+            show.Set(Terminal, GpuChoice.PowerSaving);
+            show.Set(@"C:\WINDOWS\explorer.exe", GpuChoice.Auto);
+            Config.GraphicsProfiles["Show"] = show;
+            Config.GraphicsProfiles["Empty"] = new GraphicsProfile("Empty");
+            Config.GraphicsProfileActive = "Show";
+
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("Show", GraphicsElement(xml)!.GetAttribute("Active"));
+            Assert.Equal("<App Key=\"" + TouchDesigner + "\" Gpu=\"HighPerformance\" />", ProfileElement(xml, "Show")!.FirstChild!.OuterXml);
+            Assert.Equal(new[] { "HighPerformance", "PowerSaving", "Auto" },
+                ProfileElement(xml, "Show")!.ChildNodes.Cast<XmlElement>().Select(e => e.GetAttribute("Gpu")));
+            Assert.NotNull(ProfileElement(xml, "Empty"));
+
+            Config.GraphicsProfiles = new SortedList<string, GraphicsProfile>(StringComparer.OrdinalIgnoreCase);
+            Config.GraphicsProfileActive = "";
+            Config.Load();
+            Assert.Equal("Show", Config.GraphicsProfileActive);
+            Assert.Equal(new[] { "Empty", "Show" }, Config.GraphicsProfiles.Keys);
+            Assert.Equal(show.Apps.Select(a => a.Key + "=" + a.Choice), Config.GraphicsProfiles["show"].Apps.Select(a => a.Key + "=" + a.Choice));
+            Assert.Empty(Config.GraphicsProfiles["Empty"].Apps);
+        }
+
+        // A file without profiles gains nothing, and with them, the rest saves the same
+        [Fact]
+        public void GraphicsProfiles_NotInTheFile_NothingIsAdded_AndTheyChangeNothingElse() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            XmlDocument without = SaveAndRead();
+            byte[] saved = File.ReadAllBytes(File_);
+            Assert.Null(GraphicsElement(without));
+            Config.Load();
+            Config.SaveCore();
+            Assert.Equal(saved, File.ReadAllBytes(File_));
+
+            File.WriteAllText(File_, WithGraphics());
+            Config.Load();
+            XmlDocument with = SaveAndRead();
+            XmlElement graphics = GraphicsElement(with)!;
+            Assert.Contains("for the LED wall", graphics.InnerXml);
+            graphics.ParentNode!.RemoveChild(graphics);
+            Assert.Equal(without.OuterXml, with.OuterXml);
+        }
+
+        [Fact]
+        public void GraphicsProfiles_Merge_KeepsUnchangedAndBrokenOnes() {
+            File.WriteAllText(File_, WithGraphics());
+            Config.Load();
+            Assert.Equal(new[] { "Show" }, Config.GraphicsProfiles.Keys);
+            Assert.Equal("Show", Config.GraphicsProfileActive);
+
+            // Another profile is added: Show is left as the file has it, Bad stays
+            Config.GraphicsProfiles["Gig"] = new GraphicsProfile("Gig");
+            XmlDocument xml = SaveAndRead();
+            Assert.Contains("for the LED wall", ProfileElement(xml, "Show")!.InnerXml);
+            Assert.Equal("Turbo", ((XmlElement) ProfileElement(xml, "Bad")!.FirstChild!).GetAttribute("Gpu"));
+            Assert.NotNull(ProfileElement(xml, "Gig"));
+            Assert.Equal("Show", GraphicsElement(xml)!.GetAttribute("Active"));
+
+            // Show is changed, then deleted; Bad is never touched
+            Config.GraphicsProfiles["Show"].Set(@"C:\WINDOWS\explorer.exe", GpuChoice.PowerSaving);
+            xml = SaveAndRead();
+            Assert.Equal(3, ProfileElement(xml, "Show")!.ChildNodes.Count);
+            Config.GraphicsProfiles.Remove("Show");
+            xml = SaveAndRead();
+            Assert.Null(ProfileElement(xml, "Show"));
+            Assert.NotNull(ProfileElement(xml, "Bad"));
+        }
+
+        [Fact]
+        public void GraphicsProfiles_DeletedInTheApplication_IsRemoved_TheBrokenOneStays() {
+            File.WriteAllText(File_, WithGraphics());
+            Config.Load();
+            Config.GraphicsProfiles.Remove("Show");
+            XmlDocument xml = SaveAndRead();
+            Assert.Null(ProfileElement(xml, "Show"));
+            Assert.NotNull(ProfileElement(xml, "Bad"));
+        }
+
+        [Fact]
+        public void GraphicsProfiles_Active_HandEditSurvives_AndNoneRemovesIt() {
+            File.WriteAllText(File_, WithGraphics());
+            Config.Load();
+            XmlDocument edit = new XmlDocument();
+            edit.Load(File_);
+            GraphicsElement(edit)!.SetAttribute("Active", "Bad");
+            edit.Save(File_);
+
+            Config.GuiStayOnTop = !Config.GuiStayOnTop;
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("Bad", GraphicsElement(xml)!.GetAttribute("Active"));
+
+            Config.GraphicsProfileActive = "";
+            xml = SaveAndRead();
+            Assert.False(GraphicsElement(xml)!.HasAttribute("Active"));
+            Assert.NotNull(ProfileElement(xml, "Show"));
+        }
+
+        [Fact]
+        public void GraphicsProfiles_AfterAFailedLoad_TheFilesAreNotRemovedOrReplaced() {
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+            File.WriteAllText(File_, WithGraphics());
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+
+            // Meanwhile a profile of the same name is made in the application
+            GraphicsProfile show = new GraphicsProfile("Show");
+            show.Set(TouchDesigner, GpuChoice.PowerSaving);
+            Config.GraphicsProfiles["Show"] = show;
+            XmlDocument xml = SaveAndRead();
+
+            XmlNodeList list = xml.SelectNodes("OmenMon/Config/GraphicsProfiles/Profile[@Name='Show']")!;
+            Assert.Equal(2, list.Count);
+            Assert.Equal(ProfileElement(before, "Show")!.OuterXml, list[0]!.OuterXml);
+            Assert.Equal("PowerSaving", ((XmlElement) list[1]!.FirstChild!).GetAttribute("Gpu"));
+            Assert.Equal(ProfileElement(before, "Bad")!.OuterXml, ProfileElement(xml, "Bad")!.OuterXml);
+            Assert.Equal("Show", GraphicsElement(xml)!.GetAttribute("Active"));
+        }
+
+        // Profiles that do not load stay in the file as they are
+        [Theory]
+        [InlineData(@"<Profile Name=""Default""><App Key=""a.exe"" Gpu=""Auto"" /></Profile>")]
+        [InlineData(@"<Profile Name=""""><App Key=""a.exe"" Gpu=""Auto"" /></Profile>")]
+        [InlineData(@"<Profile Name=""Twice""><App Key=""a.exe"" Gpu=""Auto"" /><App Key=""A.EXE"" Gpu=""PowerSaving"" /></Profile>")]
+        [InlineData(@"<Profile Name=""Numeric""><App Key=""a.exe"" Gpu=""1"" /></Profile>")]
+        [InlineData(@"<Profile Name=""NoKey""><App Gpu=""Auto"" /></Profile>")]
+        [InlineData(@"<Profile Name=""Future""><App Key=""a.exe"" Gpu=""Auto"" /><Schedule At=""20:00"" /></Profile>")]
+        public void GraphicsProfiles_Invalid_AreNotLoaded_AndStayAsTheyAre(string profile) {
+            File.WriteAllText(File_, WithGraphics("<GraphicsProfiles>" + profile + "</GraphicsProfiles>\r\n    </Config>"));
+            Config.Load();
+            Assert.False(Config.LoadFailed);
+            Assert.Empty(Config.GraphicsProfiles);
+            Config.GraphicsProfiles["Other"] = new GraphicsProfile("Other");
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal(profile, GraphicsElement(xml)!.FirstChild!.OuterXml);
+            Assert.Equal(2, GraphicsElement(xml)!.ChildNodes.Count);
         }
 
         [Fact]
