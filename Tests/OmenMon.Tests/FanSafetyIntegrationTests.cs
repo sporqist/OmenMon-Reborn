@@ -330,6 +330,29 @@ namespace OmenMon.Tests {
                 File.ReadAllText(Path.Combine(root, "App", "Cli", "CliOpBios.cs")));
         }
 
+        // Source tripwire: the GUI runs thermal panic only through ThermalPanicState.Check
+        // (tested in HighTemperatureTests), which takes the hottest reading together with
+        // whether it is complete. The GUI itself never reads the hottest temperature or
+        // feeds the state, so it cannot drop the completeness on the way.
+        [Fact]
+        public void ThermalPanic_GuiGoesThroughTheTestedCheck() {
+            string root = AppContext.BaseDirectory;
+            while(!File.Exists(Path.Combine(root, "OmenMon.xml")))
+                root = Path.GetDirectoryName(root)!;
+            // The code without its line comments
+            Func<string, string> code = f => Regex.Replace(File.ReadAllText(f), @"//.*", "");
+            Assert.Matches(@"\bop\.CheckThermalPanic\(\);",
+                code(Path.Combine(root, "App", "Gui", "GuiMonitor.cs")));
+            Assert.Matches(@"\bthis\.thermalPanic\.Check\(this\.Platform,",
+                code(Path.Combine(root, "App", "Gui", "GuiOp.cs")));
+            var offenders = Directory.GetFiles(Path.Combine(root, "App"), "*.cs", SearchOption.AllDirectories)
+                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
+                .Where(f => Regex.IsMatch(code(f), @"\bGetHottestReading\(|\bthermalPanic\.Update\("))
+                .Select(f => Path.GetRelativePath(root, f))
+                .ToList();
+            Assert.Empty(offenders);
+        }
+
     }
 
 }

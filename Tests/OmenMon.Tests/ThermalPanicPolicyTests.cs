@@ -139,6 +139,72 @@ namespace OmenMon.Tests {
             Assert.False(complete);
         }
 
+        // ThermalPanicState.Check is what the GUI monitor runs on every supervised pass.
+        // Panic started on the GPU's 92, then the GPU stops reading: the CPU's 55 is an
+        // incomplete reading and must not clear it. Once the GPU reads again, it may.
+        [Fact]
+        public void Check_IncompleteReading_NeverClearsPanic() {
+            var rig = new TestRig();
+            var panic = new ThermalPanicState();
+            rig.SetCpuTemperature(55);
+            rig.Ec.GpuTemperature = 92;
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(ThermalPanicTransition.Entered, panic.Check(rig.Platform, true, 90, 5, out SensorReading hottest));
+            Assert.Equal(92, hottest.Value);
+            Assert.True(rig.Fans.Guard.IsPanic);
+
+            rig.Ec.LockFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(ThermalPanicTransition.None, panic.Check(rig.Platform, true, 90, 5, out hottest));
+            Assert.Equal(55, hottest.Value);
+            Assert.True(panic.IsActive);
+            Assert.True(rig.Fans.Guard.IsPanic);
+
+            rig.Ec.LockFails = false;
+            rig.Ec.GpuTemperature = 60;
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(ThermalPanicTransition.Cleared, panic.Check(rig.Platform, true, 90, 5, out hottest));
+            Assert.Equal(60, hottest.Value);
+            Assert.False(panic.IsActive);
+            Assert.False(rig.Fans.Guard.IsPanic);
+        }
+
+        // An incomplete reading at or above the threshold starts panic: the GPU's state
+        // is unknown and the BIOS CPU sensor alone reads 95
+        [Fact]
+        public void Check_IncompleteReading_CanStartPanic() {
+            var rig = new TestRig();
+            var panic = new ThermalPanicState();
+            rig.SetCpuTemperature(55);
+            rig.Ec.GpuTemperature = 50;
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(ThermalPanicTransition.None, panic.Check(rig.Platform, true, 90, 5, out _));
+
+            rig.Ec.LockFails = true;
+            rig.Advance(Config.TemperatureMaxAge + 1);
+            rig.SetCpuTemperature(95);
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(ThermalPanicTransition.Entered, panic.Check(rig.Platform, true, 90, 5, out SensorReading hottest));
+            Assert.Equal(95, hottest.Value);
+            Assert.True(rig.Fans.Guard.IsPanic);
+        }
+
+        // Turned off while active: panic ends without a reading and the fans are restored
+        [Fact]
+        public void Check_Disabled_RestoresTheFans() {
+            var rig = new TestRig();
+            var panic = new ThermalPanicState();
+            rig.SetCpuTemperature(95);
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(ThermalPanicTransition.Entered, panic.Check(rig.Platform, true, 90, 5, out _));
+            Assert.True(rig.Fans.Guard.IsPanic);
+
+            Assert.Equal(ThermalPanicTransition.Disabled, panic.Check(rig.Platform, false, 90, 5, out _));
+            Assert.False(panic.IsActive);
+            Assert.False(rig.Fans.Guard.IsPanic);
+        }
+
         [Fact]
         public void SensorRejects_FirmwareGarbage() {
             var rig = new TestRig();

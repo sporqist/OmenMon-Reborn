@@ -79,6 +79,39 @@ namespace OmenMon.Hardware.Platform {
 
         }
 
+        // One thermal-panic pass on a platform whose sensors were just read (the GUI
+        // monitor calls this under the hardware lock): takes the hottest validated
+        // reading, which is incomplete while the GPU's state is unknown (panic may then
+        // start but not end), applies it and raises or restores the fans as the
+        // transition says. hottest is the reading it was judged on, for the notification.
+        public ThermalPanicTransition Check(Platform platform, bool enabled, byte threshold, byte hysteresis, out SensorReading hottest) {
+
+            hottest = platform.GetHottestReading(false, out bool complete);
+            ThermalPanicTransition transition = Update(enabled, hottest, complete, threshold, hysteresis);
+
+            switch(transition) {
+
+                // Level-based: every fan write is raised to the fan-table maximum and the
+                // monitor re-sends it on every pass (Fans.Supervise). Max Fan (0x27) is
+                // not used: it is ignored on 8BAC, freezes the EC on the
+                // FanArray.HasMaxFanFreeze boards and has been linked to firmware
+                // hibernation on battery.
+                case ThermalPanicTransition.Entered:
+                    platform.Fans.SetPanic(true);
+                    break;
+
+                // Cleared at or below (threshold - hysteresis), or the feature was turned off
+                case ThermalPanicTransition.Cleared:
+                case ThermalPanicTransition.Disabled:
+                    platform.Fans.SetPanic(false);
+                    break;
+
+            }
+
+            return transition;
+
+        }
+
         // Leaves panic without a reading; true if it was active
         public bool Clear() {
             if(!this.active)
