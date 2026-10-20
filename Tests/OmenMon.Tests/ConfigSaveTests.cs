@@ -432,6 +432,44 @@ namespace OmenMon.Tests {
             Assert.Equal("5000", Value(xml, "GuiTipDuration"));
         }
 
+        [Fact]
+        public void Save_EntryEditedByHandSinceLoad_IsNotReverted() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+
+            // The lowest row of Alpha and a model register edited while the application runs
+            string text = File.ReadAllText(File_)
+                .Replace("<Cpu>20</Cpu><Gpu>22</Gpu>", "<Cpu>22</Cpu><Gpu>25</Gpu>")
+                .Replace("<ModeReg>149</ModeReg>", "<ModeReg>150</ModeReg>");
+            File.WriteAllText(File_, text);
+
+            // Then something else is changed in the application
+            Config.FanProgram["Beta"].Level[0] = new byte[] { 33, 33 };
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("22", Program(xml, "Alpha")!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+            Assert.Contains("inside Alpha", Program(xml, "Alpha")!.InnerXml);
+            Assert.Equal("150", Models(xml, "8bac")[0]!["ModeReg"]!.InnerText);
+            Assert.Equal("33", Program(xml, "Beta")!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+        }
+
+        [Fact]
+        public void Save_DefaultEntries_AreNotWritten_UntilTheCollectionChanges() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            XmlDocument xml = SaveAndRead();
+            Assert.Null(xml.SelectSingleNode("OmenMon/Config/ColorPresets"));
+            Assert.Null(xml.SelectSingleNode("OmenMon/Config/Temperature"));
+
+            // Loading replaces all default presets with those in the file, so the first
+            // preset saved takes the unchanged defaults along
+            Config.ColorPreset["Mine"] = new BiosData.ColorTable("FF0000:FF0000:FF0000:FF0000");
+            xml = SaveAndRead();
+            Assert.Equal(3, xml.SelectNodes("OmenMon/Config/ColorPresets/Preset")!.Count);
+            Config.ColorPreset = new SortedDictionary<string, BiosData.ColorTable>();
+            Config.Load();
+            Assert.Equal(new[] { "DefaultApp", "DefaultOem", "Mine" }, Config.ColorPreset.Keys.ToArray());
+        }
+
         private static void ResetCustomPreset() {
             Config.CustomPresetFanMode = "Default";
             Config.CustomPresetGpuPower = "Medium";

@@ -145,6 +145,14 @@ namespace OmenMon.Library {
         private static readonly HashSet<string> LoadedSensors = new HashSet<string>();
         private static readonly HashSet<string> LoadedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Each collection entry as it was in memory after loading, or after the last save,
+        // in its saved form (null before Load()). On save, an entry that is unchanged is
+        // left as the file has it, so a hand edit made since then survives.
+        private static Dictionary<string, string> SnapshotColorPresets;
+        private static Dictionary<string, string> SnapshotFanPrograms;
+        private static Dictionary<string, string> SnapshotSensors;
+        private static Dictionary<string, string> SnapshotModels;
+
         // Retrieves an unsigned word-sized value from the XML configuration file
         private static bool GetWord(XmlDocument xml, string node, out ushort value) {
             value = 0;
@@ -583,6 +591,7 @@ namespace OmenMon.Library {
             if(strayCustomPreset)
                 foreach(string name in CustomPresetValues)
                     ScalarsLoaded.Remove(XmlPathCustomPreset + name);
+            TakeEntrySnapshots();
 
         }
 
@@ -830,11 +839,12 @@ namespace OmenMon.Library {
         //
         // The existing file is updated, not regenerated: scalar values are set in place
         // if they changed in this session and removed if they are at their defaults
-        // (see SaveScalars()), and the collections (color presets, fan programs, temperature sensors, models)
-        // are merged by key. An entry is rewritten only if its value changed, new entries
-        // are appended, and an element is removed only if it loaded successfully and has
-        // since been deleted in the application. Comments, unknown elements and entries
-        // that failed to load stay as they are. The file is written to a temporary file
+        // (see SaveScalars()), and the collections (color presets, fan programs,
+        // temperature sensors, models) are merged by key. An entry is rewritten only if
+        // it changed in this session, new entries are appended, and an element is
+        // removed only if it loaded successfully and has since been deleted in the
+        // application. Comments, unknown elements and entries that failed to load stay
+        // as they are. The file is written to a temporary file
         // first and then swapped in, so an interrupted save cannot leave it truncated.
         // An existing file that cannot be parsed is kept as a backup copy before a new
         // one is written from the template.
@@ -874,16 +884,16 @@ namespace OmenMon.Library {
             RemoveStrayCustomPreset(xml);
 
             // Color presets
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixColorPresets),
-                XmlElementColorPreset, KeyOfColorPreset, ColorPreset, LoadedColorPresets,
+            MergeEntries(xml, XmlPrefixColorPresets,
+                XmlElementColorPreset, KeyOfColorPreset, ColorPreset, LoadedColorPresets, SnapshotColorPresets,
                 node => {
                     string name; BiosData.ColorTable table;
                     return TryParseColorPreset(node, out name, out table) ? BuildColorPreset(xml, name, table) : null; },
                 (name, table) => BuildColorPreset(xml, name, table));
 
             // Fan programs
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixFanPrograms),
-                XmlElementFanProgram, KeyOfFanProgram, FanProgram, LoadedFanPrograms,
+            MergeEntries(xml, XmlPrefixFanPrograms,
+                XmlElementFanProgram, KeyOfFanProgram, FanProgram, LoadedFanPrograms, SnapshotFanPrograms,
                 node => {
                     FanProgramData program;
                     return TryParseFanProgram(node, out program) ? BuildFanProgram(xml, program.Name, program) : null; },
@@ -894,18 +904,17 @@ namespace OmenMon.Library {
             Func<XmlElement, XmlElement> canonicalSensor = node => {
                 string name; TemperatureSensorData sensor;
                 return TryParseSensor(node, out name, out sensor) ? BuildSensor(xml, name, sensor) : null; };
-            XmlElement sensors = (XmlElement) SetPath(xml, XmlPrefixTemperature);
             bool sensorsInFile = false;
-            foreach(XmlNode node in sensors.SelectNodes(XmlElementTemperatureSensor))
+            foreach(XmlNode node in xml.SelectNodes(XmlPrefixTemperatureSensor))
                 sensorsInFile |= canonicalSensor((XmlElement) node) != null;
             if(LoadedSensors.Count > 0 || !sensorsInFile)
-                MergeEntries(xml, sensors,
-                    XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors,
+                MergeEntries(xml, XmlPrefixTemperature,
+                    XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors, SnapshotSensors,
                     canonicalSensor, (name, sensor) => BuildSensor(xml, name, sensor));
 
             // Model database entries
-            MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixModels),
-                XmlElementModel, KeyOfModel, Models, LoadedModels,
+            MergeEntries(xml, XmlPrefixModels,
+                XmlElementModel, KeyOfModel, Models, LoadedModels, SnapshotModels,
                 node => {
                     OmenMon.Hardware.Platform.PlatformPreset p;
                     return TryParseModel(node, out p) ? BuildModel(xml, p) : null; },
@@ -937,6 +946,7 @@ namespace OmenMon.Library {
 
             // What the file now holds is what the next save compares against
             ScalarsLoaded = scalarsSaved;
+            TakeEntrySnapshots();
 
         }
 
@@ -1123,17 +1133,24 @@ namespace OmenMon.Library {
 
         // Merges one keyed collection into its parent element (see SaveCore())
         private static void MergeEntries<T>(
-            XmlDocument xml, XmlElement parent, string elementName,
+            XmlDocument xml, string path, string elementName,
             Func<XmlElement, string> keyOf,
             IEnumerable<KeyValuePair<string, T>> entries,
             HashSet<string> loaded,
+            Dictionary<string, string> snapshot,
             Func<XmlElement, XmlElement> canonical,
             Func<string, T, XmlElement> build) {
 
             // Index the existing elements by key
+            XmlElement parent = xml.SelectSingleNode(path.TrimEnd('/')) as XmlElement;
             Dictionary<string, List<XmlElement>> existing =
                 new Dictionary<string, List<XmlElement>>(loaded.Comparer);
-            foreach(XmlNode child in parent.ChildNodes) {
+            bool inFile = false;
+            List<XmlNode> children = new List<XmlNode>();
+            if(parent != null)
+                foreach(XmlNode child in parent.ChildNodes)
+                    children.Add(child);
+            foreach(XmlNode child in children) {
                 XmlElement element = child as XmlElement;
                 if(element == null || element.Name != elementName)
                     continue;
@@ -1144,13 +1161,38 @@ namespace OmenMon.Library {
                 if(!existing.TryGetValue(key, out list))
                     existing[key] = list = new List<XmlElement>();
                 list.Add(element);
+                inFile |= canonical(element) != null;
             }
 
-            // Update changed entries and append new ones
+            // Find the entries that changed since loading or the last save (all of them
+            // before any Load())
+            List<KeyValuePair<string, XmlElement>> changed = new List<KeyValuePair<string, XmlElement>>();
+            List<KeyValuePair<string, XmlElement>> unchanged = new List<KeyValuePair<string, XmlElement>>();
             HashSet<string> present = new HashSet<string>(loaded.Comparer);
             foreach(KeyValuePair<string, T> entry in entries) {
                 present.Add(entry.Key);
                 XmlElement fresh = build(entry.Key, entry.Value);
+                string before;
+                if(snapshot != null && snapshot.TryGetValue(entry.Key, out before) && before == fresh.OuterXml)
+                    unchanged.Add(new KeyValuePair<string, XmlElement>(entry.Key, fresh));
+                else
+                    changed.Add(new KeyValuePair<string, XmlElement>(entry.Key, fresh));
+            }
+
+            // Loading replaces the defaults of color presets and sensors with what the file
+            // holds, so if it holds none of them yet, the unchanged defaults are written
+            // together with the first change, or they would be gone on the next start
+            if(changed.Count > 0 && loaded.Count == 0 && !inFile)
+                changed.AddRange(unchanged);
+
+            // The parent element is only created if there is something to write
+            if(parent == null && changed.Count > 0)
+                parent = (XmlElement) SetPath(xml, path);
+
+            // Update changed entries and append new ones; unchanged entries are left as
+            // the file has them
+            foreach(KeyValuePair<string, XmlElement> entry in changed) {
+                XmlElement fresh = entry.Value;
                 List<XmlElement> list;
                 if(existing.TryGetValue(entry.Key, out list)) {
 
@@ -1183,10 +1225,42 @@ namespace OmenMon.Library {
                         if(canonical(element) != null)
                             parent.RemoveChild(element);
 
-            // The file now holds exactly what is in memory
+            // The file now holds what was written and the unchanged entries that loaded
+            // (an unchanged default that was never written is not in the file)
+            HashSet<string> held = new HashSet<string>(loaded.Comparer);
+            foreach(KeyValuePair<string, XmlElement> entry in changed)
+                held.Add(entry.Key);
+            foreach(KeyValuePair<string, XmlElement> entry in unchanged)
+                if(loaded.Contains(entry.Key))
+                    held.Add(entry.Key);
             loaded.Clear();
-            loaded.UnionWith(present);
+            loaded.UnionWith(held);
 
+        }
+
+        // Records every collection entry in its saved form (see MergeEntries())
+        private static void TakeEntrySnapshots() {
+            try {
+                XmlDocument xml = new XmlDocument();
+                SnapshotColorPresets = EntrySnapshot(ColorPreset, LoadedColorPresets,
+                    (name, table) => BuildColorPreset(xml, name, table));
+                SnapshotFanPrograms = EntrySnapshot(FanProgram, LoadedFanPrograms,
+                    (name, program) => BuildFanProgram(xml, name, program));
+                SnapshotSensors = EntrySnapshot(TemperatureSensor, LoadedSensors,
+                    (name, sensor) => BuildSensor(xml, name, sensor));
+                SnapshotModels = EntrySnapshot(Models, LoadedModels, (id, p) => BuildModel(xml, p));
+            } catch {
+                SnapshotColorPresets = SnapshotFanPrograms = SnapshotSensors = SnapshotModels = null;
+            }
+        }
+
+        private static Dictionary<string, string> EntrySnapshot<T>(
+            IEnumerable<KeyValuePair<string, T>> entries, HashSet<string> loaded,
+            Func<string, T, XmlElement> build) {
+            Dictionary<string, string> snapshot = new Dictionary<string, string>(loaded.Comparer);
+            foreach(KeyValuePair<string, T> entry in entries)
+                snapshot[entry.Key] = build(entry.Key, entry.Value).OuterXml;
+            return snapshot;
         }
 
         // Collection element keys, matching the dictionary keys Load() uses
