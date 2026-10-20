@@ -314,6 +314,28 @@ namespace OmenMon.Library {
                 | User32.SHTDN_REASON_FLAG_PLANNED);
 
         }
+
+        // Signs the user out, or restarts the system, for a planned application
+        // reconfiguration (Graphics apps: apps take a new GPU when they start again).
+        // Never forced: apps with unsaved work can ask the user first. Only ever called
+        // after the user confirmed it. False with the Win32 error if Windows refused.
+        public static bool EndSession(bool restart, out int error) {
+            error = 0;
+
+            // Restarting needs the shutdown privilege, signing out does not
+            if(restart)
+                EnableTokenPrivilege("SeShutdownPrivilege");
+
+            if(User32.ExitWindowsEx(
+                restart ? User32.EWX_REBOOT : User32.EWX_LOGOFF,
+                User32.SHTDN_REASON_MAJOR_APPLICATION
+                | User32.SHTDN_REASON_MINOR_RECONFIG
+                | User32.SHTDN_REASON_FLAG_PLANNED) != 0)
+                return true;
+            error = Marshal.GetLastWin32Error();
+            return false;
+
+        }
 #endregion
 
 #region Task Scheduling
