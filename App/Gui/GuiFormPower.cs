@@ -15,7 +15,8 @@ namespace OmenMon.AppGui {
 
     // Power & Efficiency window: what draws power right now and why, plus Eco+.
     // Readings run on a worker thread every 3 s (WMI and NVML calls can take a moment);
-    // the window only renders them. Nothing here reads the EC.
+    // the window only renders them. NVML is read far less often (NvmlSchedule), so the
+    // window does not keep the discrete GPU awake. Nothing here reads the EC.
     public class GuiFormPower : Form {
 
         private static GuiFormPower instance;
@@ -155,6 +156,8 @@ namespace OmenMon.AppGui {
             if(what != null)
                 EcoPlusLog.Append(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusLog.FileName),
                     DateTime.Now, "Power window: " + what);
+            if(what == null && this.Eco?.LastError != null)
+                what = "Not changed: " + this.Eco.LastError;
             if(what == null && this.Eco != null && this.Eco.RefreshPending)
                 what = "On. The refresh rate changes once the power source has been stable for "
                     + Config.EcoPlusRefreshHold + " s.";
@@ -168,15 +171,20 @@ namespace OmenMon.AppGui {
                 return;
             int n = 0;
             try { n = this.Eco?.ReleaseGpu(apps) ?? 0; } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
-            LblGpuNote.Text = n + " app(s) set to power saving. They use the integrated GPU after a restart.";
+            if(this.Eco?.LastError != null)
+                LblGpuNote.Text = n + " app(s) set to power saving; the rest left as they are: " + this.Eco.LastError;
+            else
+                LblGpuNote.Text = n + " app(s) set to power saving. They use the integrated GPU after a restart.";
             this.Listed.Clear();   // re-list with the new preferences
             UpdateRestoreButton();
         }
 
         private void EventRestore() {
-            int n = 0;
-            try { n = this.Eco?.RestoreGpu() ?? 0; } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
-            LblGpuNote.Text = n + " preference(s) restored. Apps pick them up when they restart.";
+            int n = 0, skipped = 0;
+            try { if(this.Eco != null) n = this.Eco.RestoreGpu(out skipped); } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
+            LblGpuNote.Text = n + " preference(s) restored"
+                + (skipped > 0 ? ", " + skipped + " changed since and left as they are" : "")
+                + (this.Eco?.LastError != null ? "; " + this.Eco.LastError : ". Apps pick them up when they restart.");
             this.Listed.Clear();
             UpdateRestoreButton();
         }

@@ -101,6 +101,9 @@ namespace OmenMon.Library.Locale {
                 ["CliTaskKey"] = "Omen Key Interception",
                 ["CliTaskMux"] = "Advanced Optimus Bug Fix",
 
+                // CLI: Eco+
+                ["CliEcoPlus"] = "Eco+",
+
                 // CLI: Usage
                 ["CliUsage"] = "Usage Information",
                 ["CliUsageText"] =
@@ -113,6 +116,8 @@ namespace OmenMon.Library.Locale {
                     "  -Ec [<Reg>][=<Byte>]+     Get or set byte value(s) of one or more specific registers" + Environment.NewLine +
                     "  -Ec [<Reg>(2)][=<Word>]+  Get or set word value(s) of one or more pair(s) of consecutive specific registers" + Environment.NewLine +
                     "  -EcMon [FileName]         Monitor the values of all registers for changes and report, optionally save to file" + Environment.NewLine +
+                    "  -EcoPlus                  List the original settings Eco+ keeps to restore" + Environment.NewLine +
+                    "  -EcoPlus Restore          Restore everything Eco+ changed (OmenMon must not be running; for uninstalling)" + Environment.NewLine +
                     "  -Prog                     List available fan control programs loaded from the configuration file" + Environment.NewLine +
                     "  -Prog <Name>              Run a specified fan control program" + Environment.NewLine +
                     "  -Run <TName> [<Args>]     Run a specified task (in headless mode, no console output)" + Environment.NewLine +

@@ -66,8 +66,10 @@ namespace OmenMon.AppGui {
             try {
                 if(settings.GpuPower.HasValue)
                     this.Platform.System.SetGpuPower(new BiosData.GpuPowerData(settings.GpuPower.Value));
-                if(settings.RefreshRate.HasValue)
+                if(settings.RefreshRate.HasValue) {
                     Os.SetRefreshRate(settings.RefreshRate.Value);
+                    this.EcoPlus.NoteRefreshSetByUser();
+                }
                 if(settings.Levels != null)
                     this.Platform.Fans.SetLevels(settings.Levels);
             } catch { }

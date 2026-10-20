@@ -42,6 +42,7 @@ namespace OmenMon.Library {
         public uint? GpuPowerMW, GpuTemperature;
         public int? GpuPState;
         public List<GpuHolder> GpuHolders = new List<GpuHolder>();
+        public DateTime? GpuDetailsTime;   // when the NVML values above were read
 
         public bool OnBattery { get { return this.OnAc == false; } }
 
@@ -131,9 +132,11 @@ namespace OmenMon.Library {
             sb.AppendLine().Append("DISCRETE GPU").AppendLine(s.GpuName != null ? "  " + s.GpuName : "");
             sb.Append("  state         ").AppendLine(PowerStateName(s.GpuPowerState));
             if(s.GpuPowerState == 1) {
+                int age = s.GpuDetailsTime.HasValue ? (int) (s.Time - s.GpuDetailsTime.Value).TotalSeconds : 0;
                 sb.Append("  power         ").Append(s.GpuPowerMW.HasValue ? Watts((int) s.GpuPowerMW.Value) : "?")
                   .Append(s.GpuPState.HasValue ? ", P" + s.GpuPState.Value : "")
-                  .AppendLine(s.GpuTemperature.HasValue ? ", " + s.GpuTemperature.Value + " °C" : "");
+                  .Append(s.GpuTemperature.HasValue ? ", " + s.GpuTemperature.Value + " °C" : "")
+                  .AppendLine(age >= 5 ? "  (read " + age + " s ago)" : "");
                 if(s.GpuHolders.Count > 0) {
                     sb.AppendLine("  kept awake by (apps with a context on it):");
                     foreach(GpuHolder h in s.GpuHolders)
@@ -149,6 +152,42 @@ namespace OmenMon.Library {
 
     }
 
+    // When the Power window reads NVML. Each NVML session talks to the GPU, which can
+    // keep it from powering off (runtime D3), so it is read only while the GPU is on
+    // (D0) anyway: once when it has just woken up (to show what woke it), then every
+    // BusyInterval while apps hold it, and only every IdleInterval while none does,
+    // when it could power off. In between the window shows the last values.
+    public sealed class NvmlSchedule {
+
+        public static readonly TimeSpan BusyInterval = TimeSpan.FromSeconds(15);
+        public static readonly TimeSpan IdleInterval = TimeSpan.FromSeconds(60);
+
+        private DateTime? last;
+        private bool lastIdle, woke;
+        private int lastState = -1;
+
+        // Whether to read now, given the PnP power state (1 = D0)
+        public bool Due(DateTime now, int powerState) {
+            if(powerState == 1 && this.lastState != 1)
+                this.woke = true;   // until the next reading
+            this.lastState = powerState;
+            if(powerState != 1)
+                return false;
+            if(!this.last.HasValue)
+                return true;
+            TimeSpan since = now - this.last.Value;
+            return since >= (this.lastIdle && !this.woke ? IdleInterval : BusyInterval);
+        }
+
+        // A reading was made, with this many apps holding the GPU
+        public void Done(DateTime now, int holders) {
+            this.last = now;
+            this.lastIdle = holders == 0;
+            this.woke = false;
+        }
+
+    }
+
     // Reads PowerSnapshots. Keeps its sessions open between readings; not thread-safe,
     // use from one thread (the window's worker).
     public sealed class PowerReader : IDisposable {
@@ -160,6 +199,8 @@ namespace OmenMon.Library {
         private string gpuInstanceId;
         private bool gpuLookedUp, nvmlUp, nvmlFailed;
         private IntPtr nvmlDevice;
+        private readonly NvmlSchedule nvmlSchedule = new NvmlSchedule();
+        private PowerSnapshot nvmlLast;   // the last NVML values, shown until the next reading
 
         public PowerSnapshot Read() {
             PowerSnapshot s = new PowerSnapshot { Time = DateTime.Now };
@@ -250,8 +291,15 @@ namespace OmenMon.Library {
 
             // PnP power state first: NVML would wake a GPU that is asleep
             s.GpuPowerState = CfgMgr.GetDevicePowerState(this.gpuInstanceId);
+            bool due = this.nvmlSchedule.Due(s.Time, s.GpuPowerState);
             if(s.GpuPowerState != 1 || this.nvmlFailed)
                 return;
+            if(!due || CfgMgr.GetDevicePowerState(this.gpuInstanceId) != 1) {   // again, right before
+                ShowLast(s);
+                return;
+            }
+            // A failed reading waits the idle interval too, not 3 s
+            this.nvmlSchedule.Done(s.Time, 0);
             // NVML is opened and closed around each reading: an open session could itself
             // keep the GPU from powering off
             try {
@@ -277,6 +325,9 @@ namespace OmenMon.Library {
                     } catch { }
                     s.GpuHolders.Add(h);
                 }
+                s.GpuDetailsTime = s.Time;
+                this.nvmlSchedule.Done(s.Time, s.GpuHolders.Count);
+                this.nvmlLast = s;
             } catch(DllNotFoundException) {
                 this.nvmlFailed = true;
             } catch(EntryPointNotFoundException) {
@@ -291,6 +342,25 @@ namespace OmenMon.Library {
         }
 
         private string gpuName;
+
+        // The last NVML values, with each app's GPU preference read again (cheap, and it
+        // changes when the window sets apps to power saving)
+        private void ShowLast(PowerSnapshot s) {
+            PowerSnapshot l = this.nvmlLast;
+            if(l == null)
+                return;
+            s.GpuPowerMW = l.GpuPowerMW;
+            s.GpuPState = l.GpuPState;
+            s.GpuTemperature = l.GpuTemperature;
+            s.GpuDetailsTime = l.GpuDetailsTime;
+            foreach(GpuHolder h in l.GpuHolders) {
+                GpuHolder c = new GpuHolder { Pid = h.Pid, Name = h.Name, Path = h.Path, AppKey = h.AppKey, Preference = h.Preference };
+                try {
+                    if(c.AppKey != null) c.Preference = this.prefs.Get(c.AppKey);
+                } catch { }
+                s.GpuHolders.Add(c);
+            }
+        }
 
         private delegate int ProcessQuery(IntPtr device, ref uint count, Nvml.ProcessInfo[] infos);
 

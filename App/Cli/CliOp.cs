@@ -463,6 +463,33 @@ namespace OmenMon.AppCli {
                     i--;
                     break;
 
+                // Eco+: list what it saved to restore, or restore it all (for uninstalling)
+                case "-ecoplus":
+                    Cli.PrintContext(Config.Locale.Get(Config.L_CLI + "EcoPlus"), "-EcoPlus");
+
+                    // If no argument, since this was the last one already
+                    // or next argument indicates another context
+                    if(++i == args.Length || args[i].StartsWith("-"))
+
+                        // List the saved originals
+                        EcoPlusShow();
+
+                    // Otherwise, the only operation that takes no further arguments
+                    else if(args[i].ToLower() == "restore")
+                        EcoPlusRestore();
+
+                    // Encountered an unrecognized argument
+                    else {
+                        App.Error("ErrArgUnknown");
+                        goto showUsage; // Interrupt the context loop
+                    }
+
+                    // Point the iterator to the next context argument, if any
+                    if(i < args.Length && !args[i].StartsWith("-"))
+                        i++;
+                    i--;
+                    break;
+
                     // Run a full hardware probe and dump the results as Markdown
                 case "-probe":
                     ProbeRun();

@@ -26,11 +26,21 @@ namespace OmenMon.Tests {
             public void Remove(string app) { this.Values.Remove(app); }
         }
 
+        // The internal panel ("panel") and any other displays; a display not in Rates is not active
         private sealed class FakeDisplay : IDisplayRate {
-            public int Hz = 165;
+            public readonly Dictionary<string, int> Rates = new Dictionary<string, int> { ["panel"] = 165 };
+            public string? PanelId = "panel";
             public int Sets;
-            public int Current() { return this.Hz; }
-            public bool SetDynamic(int hz) { if(hz != this.Hz) this.Sets++; this.Hz = hz; return true; }
+            public bool Fail;
+            public int Hz { get { return this.Rates["panel"]; } set { this.Rates["panel"] = value; } }
+            public string Panel() { return this.PanelId != null && this.Rates.ContainsKey(this.PanelId) ? this.PanelId : null!; }
+            public int Current(string d) { return d != null && this.Rates.TryGetValue(d, out int v) ? v : 0; }
+            public bool SetDynamic(string d, int hz) {
+                if(this.Fail || d == null || !this.Rates.ContainsKey(d)) return false;
+                if(this.Rates[d] != hz) this.Sets++;
+                this.Rates[d] = hz;
+                return true;
+            }
         }
 
         private static readonly Guid Balanced = new Guid("381b4222-f694-41f0-9685-ff5bb260df2e");
@@ -217,6 +227,159 @@ namespace OmenMon.Tests {
             Assert.Equal(165, this.display.Hz);
         }
 
+        // Once per battery period: a rate someone else set is theirs
+        [Fact]
+        public void Refresh_RaisedByTheUserOnBattery_IsLeftAlone_UntilThePowerSourceChanges() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            this.display.Hz = 165;               // tray: 165 Hz to watch a video
+            Tick(eco, true, 600);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Equal(1, this.display.Sets);
+            Assert.Null(eco.State.RefreshBefore);
+            Tick(eco, false, 300);               // plugged in: nothing to put back
+            Assert.Equal(165, this.display.Hz);
+            Tick(eco, true, 121);                // the next battery period lowers again
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(2, this.display.Sets);
+        }
+
+        [Fact]
+        public void Refresh_PresetOnBattery_IsNotOverriddenOnAc() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Hz = 48;                // a preset or Windows Settings
+            Tick(eco, true, 60);
+            Tick(eco, false, 300);
+            Assert.Equal(48, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_SetByTheUser_EvenToTheSameRate_IsNotPutBack() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            eco.NoteRefreshSetByUser();          // the Eco preset: 60 Hz saved as the mode
+            Assert.Null(eco.State.RefreshBefore);
+            Tick(eco, false, 300);
+            Assert.Equal(60, this.display.Hz);
+            Assert.Contains("set by the user", LogText);
+        }
+
+        [Fact]
+        public void Refresh_ChangedWhileNotRunning_IsNotRestored() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            var again = NewEco();                // OmenMon restarted; meanwhile the user set 144 Hz
+            this.display.Hz = 144;
+            string done = null!;
+            for(int i = 0; i < 130; i++) { done = again.Maintain(false) ?? done; this.now = this.now.AddSeconds(1); }
+            Assert.Equal(144, this.display.Hz);
+            Assert.Null(again.State.RefreshBefore);
+            Assert.Contains("left at 144 Hz", done);
+        }
+
+        [Fact]
+        public void Refresh_WindowsResetOnResume_IsLoweredAgainOnce() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Hz = 165;               // resume from sleep: Windows put the saved mode back
+            eco.NoteDisplayReset();
+            Tick(eco, true, 5);
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(2, this.display.Sets);
+            this.display.Hz = 165;               // again in the same period: left alone
+            eco.NoteDisplayReset();
+            Tick(eco, true, 60);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_AfterARebootOnBattery_IsLoweredAgain_AndRestoredOnAc() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Hz = 165;               // rebooted: the saved mode is back
+            var again = NewEco();
+            Tick(again, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            Tick(again, false, 121);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(again.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_OnlyThePanelIsChanged_NotAnotherDisplay() {
+            this.display.Rates["wall"] = 144;    // LED wall output
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(144, this.display.Rates["wall"]);
+            Assert.Equal("panel", eco.State.RefreshDisplay);
+            Assert.Equal(60, eco.State.RefreshSet);
+        }
+
+        [Fact]
+        public void Refresh_PanelGone_IsNotRestoredOnAnotherDisplay() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Rates.Remove("panel");  // lid closed, only the external display left
+            this.display.Rates["wall"] = 60;
+            string done = null!;
+            for(int i = 0; i < 130; i++) { done = eco.Maintain(false) ?? done; this.now = this.now.AddSeconds(1); }
+            Assert.Equal(60, this.display.Rates["wall"]);
+            Assert.Null(eco.State.RefreshBefore);
+            Assert.Contains("not active", done);
+        }
+
+        [Fact]
+        public void Refresh_NoPanel_NothingIsLowered() {
+            this.display.PanelId = null;
+            this.display.Rates["wall"] = 144;
+            var eco = HeldEco();
+            Tick(eco, true, 200);
+            Assert.Equal(144, this.display.Rates["wall"]);
+            Assert.Equal(0, this.display.Sets);
+        }
+
+        [Fact]
+        public void Refresh_FailedRestore_IsRetried_ThenDropped() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Fail = true;
+            Tick(eco, false, 121);
+            Assert.NotNull(eco.State.RefreshBefore);
+            Tick(eco, false, 3);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_OldStateLine_IsRestoredWhileStillLower() {
+            File.WriteAllText(StatePath, "refresh\t165\r\n");
+            this.display.Hz = 60;
+            var eco = NewEco();
+            Assert.Null(eco.State.RefreshDisplay);
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(false);
+            Assert.Equal(165, this.display.Hz);
+
+            File.WriteAllText(StatePath, "refresh\t165\r\n");
+            NewEco().Maintain(false);            // already back at 165: nothing to do
+            Assert.Equal(1, this.display.Sets);
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
+        public void State_KeepsTheRateSetAndTheDisplay() {
+            var s = new EcoPlusState(StatePath) { RefreshBefore = 165, RefreshSet = 60, RefreshDisplay = @"\\?\DISPLAY#BOE0B7C#4&1&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}" };
+            Assert.True(s.Save());
+            var t = EcoPlusState.Load(StatePath);
+            Assert.Equal(165, t.RefreshBefore);
+            Assert.Equal(60, t.RefreshSet);
+            Assert.Equal(s.RefreshDisplay, t.RefreshDisplay);
+        }
+
         [Fact]
         public void Boost_IsNotHeld() {
             var eco = HeldEco();
@@ -258,6 +421,85 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Gpu_ChangedSince_IsNotRestored() {
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";
+            var eco = NewEco();
+            eco.ReleaseGpu(new[] { "a.exe", "b.exe" });
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";   // set back in Windows Settings
+            Assert.Equal(1, eco.RestoreGpu(out int skipped));
+            Assert.Equal(1, skipped);
+            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
+            Assert.Null(this.gpu.Get("b.exe"));
+            Assert.Empty(eco.State.SavedGpu);
+            Assert.Contains("a.exe left at high performance", LogText);
+        }
+
+        [Fact]
+        public void Gpu_ReleasedAgainAfterAChange_KeepsTheNewerValue() {
+            this.gpu.Values["a.exe"] = "GpuPreference=0;";
+            var eco = NewEco();
+            eco.ReleaseGpu(new[] { "a.exe" });
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";   // the user's choice since
+            eco.ReleaseGpu(new[] { "a.exe" });
+            eco.RestoreGpu();
+            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
+        }
+
+        [Fact]
+        public void Boost_ChangedSince_IsNotRestored() {
+            var eco = NewEco();
+            eco.Maintain(true);
+            this.plan.Dc[Balanced] = 3;          // powercfg while Eco+ was on
+            string done = eco.RestoreSettings();
+            Assert.Equal(3u, this.plan.Dc[Balanced]);
+            Assert.Contains("left at efficient enabled", done);
+            Assert.True(eco.State.IsEmpty);
+        }
+
+        // On exit the battery settings go back; GPU preferences are an explicit choice and stay
+        [Fact]
+        public void Exit_RestoresBoostAndRefresh_KeepsGpu_AndChangesNothingAfterwards() {
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            var eco = NewEco();
+            eco.Maintain(true);
+            eco.ReleaseGpu(new[] { "a.exe" });
+            Assert.NotNull(eco.RestoreForExit());
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Equal(EcoPlus.GpuPowerSaving, this.gpu.Get("a.exe"));
+            Assert.Null(eco.Maintain(true));
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Single(EcoPlusState.Load(StatePath).SavedGpu);
+        }
+
+        [Fact]
+        public void RestoreAll_PutsEverythingBack_AsTheCliDoes() {
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            NewEco().Maintain(true);
+            NewEco().ReleaseGpu(new[] { "a.exe" });
+            this.options = new EcoPlusOptions { Enabled = false };
+            var cli = NewEco();                  // a separate process, from the state file alone
+            string done = cli.RestoreAll();
+            Assert.Contains("1 GPU preference(s) back", done);
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(this.gpu.Get("a.exe"));
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
+        public void RestoreAll_WithNoState_DoesNothing() {
+            this.plan.Dc[Balanced] = 0;
+            this.display.Hz = 60;
+            Assert.Null(NewEco().RestoreAll());
+            Assert.Equal(0, this.plan.Writes);
+            Assert.Equal(0, this.display.Sets);
+            Assert.Empty(this.gpu.Values);
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
         public void Gpu_AlreadyPowerSaving_IsSkipped() {
             this.gpu.Values["a.exe"] = EcoPlus.GpuPowerSaving;
             Assert.Equal(0, NewEco().ReleaseGpu(new[] { "a.exe" }));
@@ -271,6 +513,101 @@ namespace OmenMon.Tests {
             Assert.Equal(3u, s.SavedBoostDc[Balanced]);
             Assert.Null(s.RefreshBefore);
             Assert.Empty(s.SavedGpu);
+        }
+
+        // The state file is written before Windows is changed: no saved original, no change
+        private string LogText { get { string p = Path.Combine(this.dir, EcoPlusLog.FileName); return File.Exists(p) ? File.ReadAllText(p) : ""; } }
+
+        private void BreakSaving() { Directory.CreateDirectory(StatePath + ".tmp"); }
+        private void FixSaving() { Directory.Delete(StatePath + ".tmp"); }
+
+        [Fact]
+        public void FailedSave_LeavesBoostAlone_AndIsLoggedOnce() {
+            var eco = NewEco();
+            BreakSaving();
+            eco.Maintain(true);
+            eco.Maintain(true);
+            Assert.Equal(0, this.plan.Writes);
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.True(eco.State.IsEmpty);
+            Assert.NotNull(eco.LastError);
+            Assert.Single(LogText.Split('\n'), l => l.Contains("could not save"));
+            FixSaving();
+            eco.Maintain(true);
+            Assert.Equal(0u, this.plan.Dc[Balanced]);
+            Assert.Equal(2u, EcoPlusState.Load(StatePath).SavedBoostDc[Balanced]);
+            Assert.Null(eco.LastError);
+        }
+
+        [Fact]
+        public void FailedSave_LeavesTheRefreshRateAlone() {
+            this.plan.Dc[Balanced] = 0;
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            var eco = NewEco();
+            BreakSaving();
+            eco.Maintain(true);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void FailedSave_LeavesGpuPreferencesAlone() {
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";
+            var eco = NewEco();
+            BreakSaving();
+            Assert.Equal(0, eco.ReleaseGpu(new[] { "a.exe", "b.exe" }));
+            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
+            Assert.Null(this.gpu.Get("b.exe"));
+            Assert.Empty(eco.State.SavedGpu);
+            Assert.NotNull(eco.LastError);
+        }
+
+        [Fact]
+        public void UnreadableState_IsKeptAsBad_AndLogged() {
+            File.WriteAllText(StatePath, "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
+            EcoPlusState s;
+            // Readable by no one, but it can be renamed
+            using(new FileStream(StatePath, FileMode.Open, FileAccess.Read, FileShare.Delete))
+                s = EcoPlusState.Load(StatePath);
+            Assert.True(s.IsEmpty);
+            Assert.False(s.Blocked);
+            Assert.False(File.Exists(StatePath));
+            Assert.Contains("{381b4222", File.ReadAllText(StatePath + ".bad"));
+            new EcoPlus(this.plan, this.gpu, this.display, s, () => this.options, () => this.now);
+            Assert.Contains(".bad", LogText);
+        }
+
+        [Fact]
+        public void UnreadableState_ThatCannotBeMoved_BlocksChanges_UntilItCanBeRead() {
+            File.WriteAllText(StatePath, "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
+            this.plan.Dc[Balanced] = 0;          // as Eco+ left it before the restart
+            this.plan.Dc[HighPerf] = 1;
+            this.plan.Active = HighPerf;
+            EcoPlus eco;
+            using(new FileStream(StatePath, FileMode.Open, FileAccess.Read, FileShare.None)) {
+                eco = NewEco();
+                Assert.True(eco.State.Blocked);
+                eco.Maintain(true);
+                Assert.Equal(0, this.plan.Writes);
+                Assert.Equal(1u, this.plan.Dc[HighPerf]);
+            }
+            Assert.Contains("changes nothing", LogText);
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(true);                  // readable again: the original is restored
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
+        public void InterruptedSave_IsRecoveredFromTheTemporaryFile() {
+            File.WriteAllText(StatePath + ".tmp", "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
+            var eco = NewEco();
+            Assert.Equal(2u, eco.State.SavedBoostDc[Balanced]);
+            this.plan.Dc[Balanced] = 0;
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(false);
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.False(File.Exists(StatePath + ".tmp"));
         }
 
     }
@@ -310,6 +647,36 @@ namespace OmenMon.Tests {
             Assert.Contains("D0 (on)", t);
             Assert.Contains("explorer (12756)  preference: default", t);
             Assert.DoesNotContain("boosting", t);
+        }
+
+        // The Power window must not keep the discrete GPU awake by reading NVML every 3 s
+        [Fact]
+        public void Nvml_OnlyWhileOn_AndBackingOffWhileIdle() {
+            var n = new NvmlSchedule();
+            DateTime t = new DateTime(2026, 10, 20, 12, 0, 0);
+            Assert.False(n.Due(t, 4));                       // asleep: never
+            Assert.True(n.Due(t, 1));                        // woke up: read once
+            n.Done(t, 2);
+            Assert.False(n.Due(t.AddSeconds(3), 1));
+            Assert.False(n.Due(t.AddSeconds(12), 1));
+            Assert.True(n.Due(t.AddSeconds(15), 1));         // apps hold it: every 15 s
+            n.Done(t.AddSeconds(15), 0);
+            Assert.False(n.Due(t.AddSeconds(30), 1));        // no app: every 60 s
+            Assert.False(n.Due(t.AddSeconds(72), 1));
+            Assert.True(n.Due(t.AddSeconds(75), 1));
+            n.Done(t.AddSeconds(75), 0);
+            Assert.False(n.Due(t.AddSeconds(78), 4));        // powered off
+            Assert.False(n.Due(t.AddSeconds(81), 1));        // woke again within 15 s: not yet
+            Assert.True(n.Due(t.AddSeconds(90), 1));         // woke, 15 s after the last reading
+        }
+
+        [Fact]
+        public void Format_OldGpuDetails_ShowTheirAge() {
+            DateTime t = new DateTime(2026, 10, 20, 12, 0, 0);
+            var s = new PowerSnapshot { Time = t, OnAc = true, GpuPowerState = 1, GpuPowerMW = 4380, GpuDetailsTime = t.AddSeconds(-42) };
+            Assert.Contains("(read 42 s ago)", PowerMath.Format(s));
+            s.GpuDetailsTime = t;
+            Assert.DoesNotContain("ago", PowerMath.Format(s));
         }
 
         [Fact]
