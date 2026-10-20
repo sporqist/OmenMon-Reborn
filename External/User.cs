@@ -55,8 +55,12 @@ namespace OmenMon.External {
         // Key codes
         public const int VK_ENTER = 0x0D;
 
+        // GetWindow relationship: the owner window
+        public const uint GW_OWNER = 4;
+
         // Window messages
         public const int WM_CHAR                    = 0x0102;
+        public const int WM_CLOSE                   = 0x0010;
         public const int WM_SYSCOMMAND              = 0x0112;
         public const int WM_CTLCOLOREDIT            = 0x0133;
         public const int WM_CTLCOLORSTATIC          = 0x0138;
@@ -143,6 +147,9 @@ namespace OmenMon.External {
 #region Windows User Interface API Imports
         public const string DllName = "user32.dll";
 
+        // Top-level window enumeration callback: return true to go on
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern int ChangeDisplaySettings(ref DEVMODE devMode, int flags);
@@ -154,6 +161,11 @@ namespace OmenMon.External {
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern int EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -175,12 +187,30 @@ namespace OmenMon.External {
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 
+        // The desktop window of the shell (Explorer); zero if no shell runs
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        public static extern IntPtr GetShellWindow();
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Unicode)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern int GetWindowText(IntPtr hWnd, [Out] char[] lpString, int nMaxCount);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Unicode)]
         public static extern int GetWindowTextLength(IntPtr hWnd);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

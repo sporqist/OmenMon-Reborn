@@ -4,12 +4,13 @@
 
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace OmenMon.External {
 
     // Advanced Windows NT Base API (advapi32.dll) resources
-    // Used for kernel driver installation (service management)
-    // and privilege token management
+    // Used for kernel driver installation (service management),
+    // privilege token management and starting processes with a token
     public class AdvApi32 {
 
 #region Advanced Windows NT Base API Data
@@ -129,6 +130,53 @@ namespace OmenMon.External {
             public int PrivilegeCount;
             public LUID_AND_ATTRIBUTES Privileges;
         }
+
+        // Token access, types and information classes, used to start apps unelevated
+        // with the shell's token (Library/GraphicsRestartWindows.cs)
+        public const int TOKEN_ASSIGN_PRIMARY    = 0x00000001;
+        public const int TOKEN_DUPLICATE         = 0x00000002;
+        public const int TOKEN_ADJUST_DEFAULT    = 0x00000080;
+        public const int TOKEN_ADJUST_SESSIONID  = 0x00000100;
+
+        public const int SecurityImpersonation = 2;   // SECURITY_IMPERSONATION_LEVEL
+        public const int TokenPrimary          = 1;   // TOKEN_TYPE
+
+        public const int TokenUser      = 1;          // TOKEN_INFORMATION_CLASS
+        public const int TokenElevation = 20;
+
+        // Process creation flags
+        public const uint CREATE_SUSPENDED           = 0x00000004;
+        public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PROCESS_INFORMATION {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct STARTUPINFO {
+            public int cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public int dwX;
+            public int dwY;
+            public int dwXSize;
+            public int dwYSize;
+            public int dwXCountChars;
+            public int dwYCountChars;
+            public int dwFillAttribute;
+            public int dwFlags;
+            public short wShowWindow;
+            public short cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
 #endregion
 
 #region Advanced Windows NT Base API Imports
@@ -170,6 +218,43 @@ namespace OmenMon.External {
             string lpDependencies,
             string lpServiceStartName,
             string lpPassword);
+
+        // Starts a process with a primary token (the caller needs SeImpersonatePrivilege,
+        // which an elevated administrator has); the command line is at most 1024 characters
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Unicode, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CreateProcessWithTokenW(
+            IntPtr hToken,
+            uint dwLogonFlags,
+            string lpApplicationName,
+            StringBuilder lpCommandLine,
+            uint dwCreationFlags,
+            IntPtr lpEnvironment,
+            string lpCurrentDirectory,
+            ref STARTUPINFO lpStartupInfo,
+            out PROCESS_INFORMATION lpProcessInformation);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool DuplicateTokenEx(
+            IntPtr hExistingToken,
+            int dwDesiredAccess,
+            IntPtr lpTokenAttributes,
+            int ImpersonationLevel,
+            int TokenType,
+            out IntPtr phNewToken);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetTokenInformation(
+            IntPtr TokenHandle,
+            int TokenInformationClass,
+            IntPtr TokenInformation,
+            int TokenInformationLength,
+            out int ReturnLength);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
