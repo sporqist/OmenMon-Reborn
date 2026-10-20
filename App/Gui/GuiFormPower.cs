@@ -15,7 +15,8 @@ namespace OmenMon.AppGui {
 
     // Power & Efficiency window: what draws power right now and why, plus Eco+.
     // Readings run on a worker thread every 3 s (WMI and NVML calls can take a moment);
-    // the window only renders them. Nothing here reads the EC.
+    // the window only renders them. NVML is read far less often (NvmlSchedule), so the
+    // window does not keep the discrete GPU awake. Nothing here reads the EC.
     public class GuiFormPower : Form {
 
         private static GuiFormPower instance;

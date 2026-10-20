@@ -649,6 +649,36 @@ namespace OmenMon.Tests {
             Assert.DoesNotContain("boosting", t);
         }
 
+        // The Power window must not keep the discrete GPU awake by reading NVML every 3 s
+        [Fact]
+        public void Nvml_OnlyWhileOn_AndBackingOffWhileIdle() {
+            var n = new NvmlSchedule();
+            DateTime t = new DateTime(2026, 10, 20, 12, 0, 0);
+            Assert.False(n.Due(t, 4));                       // asleep: never
+            Assert.True(n.Due(t, 1));                        // woke up: read once
+            n.Done(t, 2);
+            Assert.False(n.Due(t.AddSeconds(3), 1));
+            Assert.False(n.Due(t.AddSeconds(12), 1));
+            Assert.True(n.Due(t.AddSeconds(15), 1));         // apps hold it: every 15 s
+            n.Done(t.AddSeconds(15), 0);
+            Assert.False(n.Due(t.AddSeconds(30), 1));        // no app: every 60 s
+            Assert.False(n.Due(t.AddSeconds(72), 1));
+            Assert.True(n.Due(t.AddSeconds(75), 1));
+            n.Done(t.AddSeconds(75), 0);
+            Assert.False(n.Due(t.AddSeconds(78), 4));        // powered off
+            Assert.False(n.Due(t.AddSeconds(81), 1));        // woke again within 15 s: not yet
+            Assert.True(n.Due(t.AddSeconds(90), 1));         // woke, 15 s after the last reading
+        }
+
+        [Fact]
+        public void Format_OldGpuDetails_ShowTheirAge() {
+            DateTime t = new DateTime(2026, 10, 20, 12, 0, 0);
+            var s = new PowerSnapshot { Time = t, OnAc = true, GpuPowerState = 1, GpuPowerMW = 4380, GpuDetailsTime = t.AddSeconds(-42) };
+            Assert.Contains("(read 42 s ago)", PowerMath.Format(s));
+            s.GpuDetailsTime = t;
+            Assert.DoesNotContain("ago", PowerMath.Format(s));
+        }
+
         [Fact]
         public void Format_GpuAsleep_SaysSo() {
             string t = PowerMath.Format(new PowerSnapshot { OnAc = true, GpuPowerState = 4 });
