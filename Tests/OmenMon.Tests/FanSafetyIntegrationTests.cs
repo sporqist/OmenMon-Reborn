@@ -281,6 +281,36 @@ namespace OmenMon.Tests {
             Assert.Equal(reads, rig.Bios.Count(0x2F));
         }
 
+        // A fan table read that has sane rows (1-100) for one fan only: that fan gets the
+        // table maximum, the other the fallback (with the warm curve: its top step, 60/63).
+        // Not cached, so the next call reads 0x2F again; once the table is good for both
+        // fans, its full maximum is cached.
+        [Theory]
+        [InlineData(false, 52, 63)] // every GPU-fan row is 0 or above 100
+        [InlineData(true, 60, 55)]  // every CPU-fan row is
+        public void FanTable_SaneForOneFanOnly_IsMixedWithTheFallback_AndRetried(bool cpuRowsBad, byte expectCpu, byte expectGpu) {
+            var rig = new TestRig();
+            rig.Platform.SafetyPolicy.WarmCurve = FanSafetyPolicy.DefaultWarmCurve();
+            byte[] good = rig.Bios.FanTable;
+            byte[] bad = (byte[]) good.Clone();
+            byte[] garbage = { 0, 101, 255 };
+            for(int row = 0; row < 3; row++)
+                bad[2 + 3 * row + (cpuRowsBad ? 0 : 1)] = garbage[row];
+            rig.Bios.FanTable = bad;
+
+            Assert.Equal(new byte[] { expectCpu, expectGpu }, rig.Fans.GetPanicLevel());
+            int reads = rig.Bios.Count(0x2F);
+            Assert.Equal(new byte[] { expectCpu, expectGpu }, rig.Fans.GetPanicLevel());
+            Assert.Equal(reads + 1, rig.Bios.Count(0x2F)); // not cached: read again
+
+            rig.Bios.FanTable = good;
+            Assert.Equal(new byte[] { 52, 55 }, rig.Fans.GetPanicLevel());
+            reads = rig.Bios.Count(0x2F);
+            rig.Bios.FanTable = bad;
+            Assert.Equal(new byte[] { 52, 55 }, rig.Fans.GetPanicLevel());
+            Assert.Equal(reads, rig.Bios.Count(0x2F)); // cached
+        }
+
         // What a program row of 30/30 is raised to while in panic with the panic level
         // GetPanicLevel() gives now
         private static byte[] ProgramRowInPanic(TestRig rig) {
