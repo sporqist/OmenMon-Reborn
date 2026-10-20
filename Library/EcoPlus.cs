@@ -5,7 +5,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -25,9 +24,10 @@ namespace OmenMon.Library {
     //    internal panel is changed, at most once per battery period, and the original is
     //    put back only on that panel and only while it still runs at the rate Eco+ set:
     //    a rate the user or a preset chose since is left as it is.
-    //  * Per-app GPU preference "power saving" (HKCU DirectX UserGpuPreferences) for the
-    //    apps that keep the discrete GPU awake. Explicit, not tied to battery: the apps
-    //    read it when they start. The original values are kept and can be restored.
+    //
+    // Per-app GPU preferences were part of Eco+ until 2026-10-20; they are now their own
+    // feature, Graphics apps (GraphicsApps.cs), which took over the originals Eco+ kept
+    // (GraphicsMigration).
     //
     // The original values live in a small state file, so they survive restarts and a
     // crash between changing and restoring a value. Each original is saved there before
@@ -36,10 +36,8 @@ namespace OmenMon.Library {
 
         // Values written
         public const uint BoostDisabled = 0;
-        public const string GpuPowerSaving = "GpuPreference=1;";
 
         private readonly IPowerPlan plan;
-        private readonly IGpuPreferences gpu;
         private readonly IDisplayRate display;
         private readonly EcoPlusState state;
         private readonly Func<EcoPlusOptions> options;
@@ -50,10 +48,9 @@ namespace OmenMon.Library {
         private bool? lineOnBattery;
         private DateTime lineSince;
 
-        public EcoPlus(IPowerPlan plan, IGpuPreferences gpu, IDisplayRate display,
+        public EcoPlus(IPowerPlan plan, IDisplayRate display,
             EcoPlusState state, Func<EcoPlusOptions> options, Func<DateTime> clock = null) {
             this.plan = plan;
-            this.gpu = gpu;
             this.display = display;
             this.state = state;
             this.options = options;
@@ -335,8 +332,6 @@ namespace OmenMon.Library {
 
         // OmenMon exits (or the Windows session ends): the battery settings are put back
         // and Eco+ changes nothing more in this run. The next start applies them again.
-        // GPU preferences stay: they are an explicit choice, not tied to battery, and
-        // nothing would set them again after a restart.
         public string RestoreForExit() {
             lock(this.sync) {
                 this.stopped = true;
@@ -346,21 +341,13 @@ namespace OmenMon.Library {
 
         private bool stopped;
 
-        // Everything Eco+ changed, GPU preferences included (OmenMon -EcoPlus Restore,
-        // for uninstalling); a description of what was done, or null if nothing was saved
+        // Everything Eco+ changed (OmenMon -EcoPlus Restore, for uninstalling); a
+        // description of what was done, or null if nothing was saved. GPU preferences
+        // are not Eco+'s any more: -Graphics Restore puts those back.
         public string RestoreAll() {
             lock(this.sync) {
                 this.stopped = true;
-                List<string> done = new List<string>();
-                string settings = RestoreSettingsLocked();
-                if(settings != null)
-                    done.Add(settings);
-                int restored = RestoreGpu(out int skipped);
-                if(restored > 0)
-                    done.Add(restored + " GPU preference(s) back");
-                if(skipped > 0)
-                    done.Add(skipped + " GPU preference(s) changed since and left as they are");
-                return done.Count > 0 ? string.Join(", ", done) : null;
+                return RestoreSettingsLocked();
             }
         }
 
@@ -396,80 +383,6 @@ namespace OmenMon.Library {
             return done.Count > 0 ? string.Join(", ", done) : null;
         }
 
-        // Sets the given apps (exe path or packaged-app AUMID) to "power saving", keeping
-        // each app's original value; returns how many were changed
-        public int ReleaseGpu(IEnumerable<string> apps) {
-            lock(this.sync) {
-                this.LastError = null;
-                int changed = 0;
-                if(!this.state.Reload()) {
-                    this.LastError = "the saved originals cannot be read, so nothing was changed";
-                    return 0;
-                }
-                foreach(string app in apps.Where(a => !string.IsNullOrWhiteSpace(a)).Distinct(StringComparer.OrdinalIgnoreCase)) {
-                    string current = this.gpu.Get(app);
-                    if(current == GpuPowerSaving)
-                        continue;
-                    // Each original is on disk before its app is changed; on a failed save
-                    // this app and the rest are left as they are. An app not at "power
-                    // saving" was changed since any earlier release, so its value now is
-                    // the one to restore.
-                    bool had = this.state.SavedGpu.TryGetValue(app, out string earlier);
-                    this.state.SavedGpu[app] = current;   // null = had no preference
-                    if(!Save("the GPU preference of " + app)) {
-                        if(had)
-                            this.state.SavedGpu[app] = earlier;
-                        else
-                            this.state.SavedGpu.Remove(app);
-                        break;
-                    }
-                    this.gpu.Set(app, GpuPowerSaving);
-                    changed++;
-                }
-                return changed;
-            }
-        }
-
-        // Puts every GPU preference Eco+ changed back as it was; returns how many
-        public int RestoreGpu() {
-            return RestoreGpu(out int skipped);
-        }
-
-        // The same; skipped counts the apps whose preference was changed since Eco+ set
-        // "power saving" (left as they are, logged, and no longer kept)
-        public int RestoreGpu(out int skipped) {
-            lock(this.sync) {
-                int restored = 0;
-                skipped = 0;
-                this.LastError = null;
-                if(!this.state.Reload())
-                    return 0;
-                foreach(KeyValuePair<string, string> saved in this.state.SavedGpu.ToList()) {
-                    try {
-                        string current = this.gpu.Get(saved.Key);
-                        if(current != GpuPowerSaving) {
-                            Log("GPU preference of " + saved.Key + " left at " + RegistryGpuPreferences.Describe(current) + ": changed since Eco+ set power saving");
-                            skipped++;
-                        } else {
-                            if(saved.Value == null)
-                                this.gpu.Remove(saved.Key);
-                            else
-                                this.gpu.Set(saved.Key, saved.Value);
-                            restored++;
-                        }
-                        this.state.SavedGpu.Remove(saved.Key);
-                    } catch(Exception e) {
-                        // Kept, for the next restore
-                        this.LastError = "could not restore the GPU preference of " + saved.Key + ": " + e.Message;
-                        Log(this.LastError);
-                    }
-                }
-                if(restored + skipped > 0)
-                    SaveRestored();
-                return restored;
-            }
-        }
-
     }
 
     public sealed class EcoPlusOptions {
@@ -486,25 +399,14 @@ namespace OmenMon.Library {
     }
 
     // What Eco+ changed and when: one timestamped line per change in OmenMon-EcoPlus.log
-    // next to the state file. Cut to its newer half when it passes MaxBytes.
+    // next to the state file (see ChangeLog)
     public static class EcoPlusLog {
 
         public const string FileName = "OmenMon-EcoPlus.log";
-        public const int MaxBytes = 64 * 1024;
+        public const int MaxBytes = ChangeLog.MaxBytes;
 
         public static void Append(string path, DateTime time, string text) {
-            if(path == null || string.IsNullOrEmpty(text))
-                return;
-            try {
-                if(File.Exists(path) && new FileInfo(path).Length > MaxBytes) {
-                    string[] lines = File.ReadAllLines(path, Encoding.UTF8);
-                    File.WriteAllLines(path, lines.Skip(lines.Length / 2), new UTF8Encoding(false));
-                }
-                File.AppendAllText(path, time.ToString("yyyy-MM-dd HH:mm:ss") + "\t" + text + "\r\n", new UTF8Encoding(false));
-            } catch {
-                // The log is a record, not a safeguard: a line that cannot be written
-                // never stops or undoes a change (the state file is what keeps originals)
-            }
+            ChangeLog.Append(path, time, text);
         }
 
     }
@@ -515,12 +417,12 @@ namespace OmenMon.Library {
     //     (the display as IDisplayRate names it; files from before a display was
     //     kept have only the original Hz)
     //   gpu <TAB> app <TAB> original value (empty = the app had no preference)
+    //     (from before Graphics apps took GPU preferences over: read so that
+    //     GraphicsMigration can move them, and written back only while they are
+    //     still here, so a failed move loses none; Eco+ never adds one)
     //
-    // Eco+ saves it before it changes Windows, and changes nothing if the save fails.
-    // A file that exists but cannot be read is never overwritten: it is moved aside to
-    // a .bad copy (originals in it kept for a human), or, if even that fails, Save
-    // refuses until a later Reload can read it.
-    public sealed class EcoPlusState {
+    // Saved before Eco+ changes Windows, with the robustness of StateFile.
+    public sealed class EcoPlusState : StateFile {
 
         public const string FileName = "OmenMon-EcoPlus.state";
 
@@ -530,68 +432,18 @@ namespace OmenMon.Library {
         public int RefreshSet;              // the rate Eco+ set, 0 = not known
         public string RefreshDisplay;       // the display it was set on, null = not known
 
-        private readonly string path;
+        public EcoPlusState(string path) : base(path) { }
 
-        public EcoPlusState(string path) {
-            this.path = path;
-        }
-
-        // Why the file could not be loaded (null if it was, or there was none)
-        public string LoadError { get; private set; }
-
-        // True while an unreadable file is still in place: Save does not overwrite it
-        public bool Blocked { get; private set; }
-
-        // Why the last Save failed (null if it worked)
-        public string LastError { get; private set; }
-
-        // The Eco+ log next to the state file
-        public string LogPath {
-            get { return this.path == null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(this.path)), EcoPlusLog.FileName); }
-        }
-
-        private string TempPath { get { return this.path + ".tmp"; } }
+        protected override string Owner { get { return "Eco+"; } }
+        protected override string LogFileName { get { return EcoPlusLog.FileName; } }
 
         public static EcoPlusState Load(string path) {
             EcoPlusState s = new EcoPlusState(path);
-            string source = s.Source();
-            if(source == null)
-                return s;
-            try {
-                s.Parse(File.ReadAllLines(source, Encoding.UTF8));
-            } catch(Exception e) {
-                s.SetAside(source, e);
-            }
+            s.LoadFile();
             return s;
         }
 
-        // Reads the file again while Blocked; true once it is no longer blocked
-        public bool Reload() {
-            if(!this.Blocked)
-                return true;
-            try {
-                string source = Source();
-                if(source != null)
-                    Parse(File.ReadAllLines(source, Encoding.UTF8));
-                this.Blocked = false;
-                this.LoadError = null;
-                return true;
-            } catch {
-                return false;
-            }
-        }
-
-        // The file to read: the state file, or the temporary file of a save that was cut
-        // short between writing it and putting it in place
-        private string Source() {
-            if(this.path == null)
-                return null;
-            if(File.Exists(this.path))
-                return this.path;
-            return File.Exists(TempPath) ? TempPath : null;
-        }
-
-        private void Parse(string[] lines) {
+        protected override void Parse(string[] lines) {
             this.SavedBoostDc.Clear();
             this.SavedGpu.Clear();
             this.RefreshBefore = null;
@@ -613,67 +465,20 @@ namespace OmenMon.Library {
             }
         }
 
-        private void SetAside(string source, Exception e) {
-            this.LoadError = "could not read " + Path.GetFileName(source) + " (" + e.Message + ")";
-            string bad = this.path + ".bad";
-            if(File.Exists(bad))
-                bad = this.path + ".bad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-            try {
-                File.Move(source, bad);
-                this.LoadError += ", kept as " + Path.GetFileName(bad) + " with the originals it holds; starting empty";
-            } catch {
-                this.Blocked = true;
-                this.LoadError += " and could not move it aside: Eco+ changes nothing until it can be read";
-            }
-        }
-
-        public bool IsEmpty {
+        public override bool IsEmpty {
             get { return this.SavedBoostDc.Count == 0 && this.SavedGpu.Count == 0 && !this.RefreshBefore.HasValue; }
         }
 
-        // Atomic: written to a temporary file first, which is never deleted while it may
-        // be the only copy; the file is removed when empty. False if it was not saved.
-        public bool Save() {
-            if(this.path == null)
-                return true;
-            if(this.Blocked) {
-                this.LastError = "the state file could not be read, so it is not overwritten";
-                return false;
-            }
-            try {
-                if(IsEmpty) {
-                    if(File.Exists(this.path))
-                        File.Delete(this.path);
-                    if(File.Exists(TempPath))
-                        File.Delete(TempPath);
-                    this.LastError = null;
-                    return true;
-                }
-                StringBuilder sb = new StringBuilder();
-                foreach(KeyValuePair<Guid, uint> b in this.SavedBoostDc)
-                    sb.Append("boost\t").Append(b.Key.ToString("B")).Append('\t').Append(b.Value).Append("\r\n");
-                if(this.RefreshBefore.HasValue)
-                    sb.Append("refresh\t").Append(this.RefreshBefore.Value).Append('\t').Append(this.RefreshSet)
-                      .Append('\t').Append(this.RefreshDisplay ?? "").Append("\r\n");
-                foreach(KeyValuePair<string, string> g in this.SavedGpu)
-                    sb.Append("gpu\t").Append(g.Key).Append('\t').Append(g.Value ?? "").Append("\r\n");
-                File.WriteAllText(TempPath, sb.ToString(), new UTF8Encoding(false));
-                if(File.Exists(this.path)) {
-                    try {
-                        File.Replace(TempPath, this.path, null);
-                    } catch when(!File.Exists(this.path) && File.Exists(TempPath)) {
-                        // ReplaceFile can fail after moving the old file away: the new
-                        // content is in the temporary file, so put that in place
-                        File.Move(TempPath, this.path);
-                    }
-                } else
-                    File.Move(TempPath, this.path);
-                this.LastError = null;
-                return true;
-            } catch(Exception e) {
-                this.LastError = e.Message;
-                return false;
-            }
+        protected override string Format() {
+            StringBuilder sb = new StringBuilder();
+            foreach(KeyValuePair<Guid, uint> b in this.SavedBoostDc)
+                sb.Append("boost\t").Append(b.Key.ToString("B")).Append('\t').Append(b.Value).Append("\r\n");
+            if(this.RefreshBefore.HasValue)
+                sb.Append("refresh\t").Append(this.RefreshBefore.Value).Append('\t').Append(this.RefreshSet)
+                  .Append('\t').Append(this.RefreshDisplay ?? "").Append("\r\n");
+            foreach(KeyValuePair<string, string> g in this.SavedGpu)
+                sb.Append("gpu\t").Append(g.Key).Append('\t').Append(g.Value ?? "").Append("\r\n");
+            return sb.ToString();
         }
 
     }
@@ -685,8 +490,10 @@ namespace OmenMon.Library {
         void WriteBoostDc(Guid scheme, uint value);   // and re-applies the scheme if active
     }
 
+    // Per-app GPU preferences (used by Graphics apps, see GraphicsApps.cs)
     public interface IGpuPreferences {
-        string Get(string app);                 // null if none
+        IList<string> Apps();                   // every value name in the store, empty if none
+        string Get(string app);                 // null if none (or not a string)
         void Set(string app, string value);
         void Remove(string app);
     }

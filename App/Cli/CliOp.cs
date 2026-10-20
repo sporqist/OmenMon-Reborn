@@ -3,6 +3,7 @@
      //  https://omenmon.github.io/
 
 using System;
+using System.Collections.Generic;
 using OmenMon.AppCli;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
@@ -487,6 +488,45 @@ namespace OmenMon.AppCli {
                     // Point the iterator to the next context argument, if any
                     if(i < args.Length && !args[i].StartsWith("-"))
                         i++;
+                    i--;
+                    break;
+
+                // Graphics apps: list the profiles and the apps OmenMon manages, apply a
+                // profile or Windows default, or adopt the GPU preferences set now
+                case "-graphics":
+                    Cli.PrintContext(Config.Locale.Get(Config.L_CLI + "Graphics"), "-Graphics");
+
+                    // If no argument, since this was the last one already
+                    // or next argument indicates another context
+                    if(++i == args.Length || args[i].StartsWith("-"))
+
+                        // List the profiles and the managed apps
+                        GraphicsShow();
+
+                    else {
+
+                        // The operation and its arguments, up to the next context
+                        string graphicsOp = args[i].ToLower();
+                        List<string> graphicsArgs = new List<string>();
+                        while(i + 1 < args.Length && !args[i + 1].StartsWith("-"))
+                            graphicsArgs.Add(args[++i]);
+
+                        if(graphicsOp == "apply" && graphicsArgs.Count == 1)
+                            GraphicsApply(graphicsArgs[0]);
+                        else if(graphicsOp == "restore" && graphicsArgs.Count == 0)
+                            GraphicsApply(GraphicsProfile.DefaultKeyword);
+                        else if(graphicsOp == "adopt" && (graphicsArgs.Count == 1 || graphicsArgs.Count == 2))
+                            GraphicsAdopt(graphicsArgs[0], graphicsArgs.Count == 2 ? graphicsArgs[1] : null);
+
+                        // Encountered an unrecognized argument
+                        else {
+                            App.Error("ErrArgUnknown");
+                            goto showUsage; // Interrupt the context loop
+                        }
+                        i++;
+                    }
+
+                    // Point the iterator to the next context argument, if any
                     i--;
                     break;
 

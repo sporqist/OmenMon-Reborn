@@ -216,7 +216,11 @@ OmenMon.exe [mode] [options]
 | `-Ec` | Open EC monitor |
 | `-Probe` | Run heuristic hardware scanner |
 | `-EcoPlus` | List the original settings Eco+ keeps to restore |
-| `-EcoPlus Restore` | Restore everything Eco+ changed (turbo boost on battery, refresh rate, GPU preferences). Exit OmenMon first; use before uninstalling |
+| `-EcoPlus Restore` | Restore everything Eco+ changed (turbo boost on battery, refresh rate). Exit OmenMon first; use before uninstalling |
+| `-Graphics` | List the graphics app profiles and the apps whose GPU preference OmenMon manages (original, value set, value now) |
+| `-Graphics Apply <Profile\|Default>` | Set a profile's per-app GPU preferences, or `Default` to give every managed app its original back. Prints the apps that take the change when they start again; restarts nothing. Exit OmenMon first |
+| `-Graphics Restore` | Same as `-Graphics Apply Default`; use before uninstalling |
+| `-Graphics Adopt <Profile> [<File.reg>]` | Make a profile of the GPU preferences set now, with the originals from a `.reg` export of `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` (without one: their values now). Changes nothing in the registry |
 
 ---
 

@@ -104,6 +104,9 @@ namespace OmenMon.Library.Locale {
                 // CLI: Eco+
                 ["CliEcoPlus"] = "Eco+",
 
+                // CLI: Graphics apps
+                ["CliGraphics"] = "Graphics Apps",
+
                 // CLI: Usage
                 ["CliUsage"] = "Usage Information",
                 ["CliUsageText"] =
@@ -118,6 +121,12 @@ namespace OmenMon.Library.Locale {
                     "  -EcMon [FileName]         Monitor the values of all registers for changes and report, optionally save to file" + Environment.NewLine +
                     "  -EcoPlus                  List the original settings Eco+ keeps to restore" + Environment.NewLine +
                     "  -EcoPlus Restore          Restore everything Eco+ changed (OmenMon must not be running; for uninstalling)" + Environment.NewLine +
+                    "  -Graphics                 List the graphics app profiles and the apps whose GPU preference OmenMon manages" + Environment.NewLine +
+                    "  -Graphics Apply <Profile> Set the GPU preferences of a profile, or Default for every app as it was" + Environment.NewLine +
+                    "                            (OmenMon must not be running; apps take the change when they start again)" + Environment.NewLine +
+                    "  -Graphics Restore         Put back every GPU preference OmenMon changed (Apply Default; for uninstalling)" + Environment.NewLine +
+                    "  -Graphics Adopt <Profile> [<File.reg>]" + Environment.NewLine +
+                    "                            Make a profile of the GPU preferences set now, originals from a .reg export" + Environment.NewLine +
                     "  -Prog                     List available fan control programs loaded from the configuration file" + Environment.NewLine +
                     "  -Prog <Name>              Run a specified fan control program" + Environment.NewLine +
                     "  -Run <TName> [<Args>]     Run a specified task (in headless mode, no console output)" + Environment.NewLine +

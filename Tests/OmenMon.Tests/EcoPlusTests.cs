@@ -19,13 +19,6 @@ namespace OmenMon.Tests {
             public void WriteBoostDc(Guid s, uint v) { this.Dc[s] = v; this.Writes++; }
         }
 
-        private sealed class FakeGpu : IGpuPreferences {
-            public readonly Dictionary<string, string> Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            public string Get(string app) { return this.Values.TryGetValue(app, out string? v) ? v! : null!; }
-            public void Set(string app, string value) { this.Values[app] = value; }
-            public void Remove(string app) { this.Values.Remove(app); }
-        }
-
         // The internal panel ("panel") and any other displays; a display not in Rates is not active
         private sealed class FakeDisplay : IDisplayRate {
             public readonly Dictionary<string, int> Rates = new Dictionary<string, int> { ["panel"] = 165 };
@@ -48,7 +41,6 @@ namespace OmenMon.Tests {
 
         private readonly string dir = Path.Combine(Path.GetTempPath(), "omenmon-ecoplus-" + Guid.NewGuid().ToString("N"));
         private readonly FakePlan plan = new FakePlan();
-        private readonly FakeGpu gpu = new FakeGpu();
         private readonly FakeDisplay display = new FakeDisplay();
         private EcoPlusOptions options = new EcoPlusOptions { Enabled = true, RefreshHoldSeconds = 0 };
         private DateTime now = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
@@ -64,7 +56,7 @@ namespace OmenMon.Tests {
         private string StatePath { get { return Path.Combine(this.dir, EcoPlusState.FileName); } }
 
         private EcoPlus NewEco() {
-            return new EcoPlus(this.plan, this.gpu, this.display, EcoPlusState.Load(StatePath), () => this.options, () => this.now);
+            return new EcoPlus(this.plan, this.display, EcoPlusState.Load(StatePath), () => this.options, () => this.now);
         }
 
         [Fact]
@@ -399,53 +391,6 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
-        public void Gpu_Release_KeepsTheOriginals_AndRestoreMatchesThem() {
-            this.gpu.Values[@"C:\Program Files\Google\Chrome\Application\chrome.exe"] = "GpuPreference=2;";
-            var eco = NewEco();
-            int n = eco.ReleaseGpu(new[] {
-                @"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
-                "microsoft.windowsterminal_8wekyb3d8bbwe!app" });   // duplicate, other case
-            Assert.Equal(2, n);
-            Assert.Equal(EcoPlus.GpuPowerSaving, this.gpu.Get(@"C:\Program Files\Google\Chrome\Application\chrome.exe"));
-            Assert.Equal(EcoPlus.GpuPowerSaving, this.gpu.Get("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"));
-
-            // A second release does not overwrite the saved originals
-            eco.ReleaseGpu(new[] { @"C:\Program Files\Google\Chrome\Application\chrome.exe" });
-
-            var again = NewEco();               // originals survive a restart
-            Assert.Equal(2, again.RestoreGpu());
-            Assert.Equal("GpuPreference=2;", this.gpu.Get(@"C:\Program Files\Google\Chrome\Application\chrome.exe"));
-            Assert.Null(this.gpu.Get("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"));
-            Assert.False(File.Exists(StatePath));
-        }
-
-        [Fact]
-        public void Gpu_ChangedSince_IsNotRestored() {
-            this.gpu.Values["a.exe"] = "GpuPreference=2;";
-            var eco = NewEco();
-            eco.ReleaseGpu(new[] { "a.exe", "b.exe" });
-            this.gpu.Values["a.exe"] = "GpuPreference=2;";   // set back in Windows Settings
-            Assert.Equal(1, eco.RestoreGpu(out int skipped));
-            Assert.Equal(1, skipped);
-            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
-            Assert.Null(this.gpu.Get("b.exe"));
-            Assert.Empty(eco.State.SavedGpu);
-            Assert.Contains("a.exe left at high performance", LogText);
-        }
-
-        [Fact]
-        public void Gpu_ReleasedAgainAfterAChange_KeepsTheNewerValue() {
-            this.gpu.Values["a.exe"] = "GpuPreference=0;";
-            var eco = NewEco();
-            eco.ReleaseGpu(new[] { "a.exe" });
-            this.gpu.Values["a.exe"] = "GpuPreference=2;";   // the user's choice since
-            eco.ReleaseGpu(new[] { "a.exe" });
-            eco.RestoreGpu();
-            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
-        }
-
-        [Fact]
         public void Boost_ChangedSince_IsNotRestored() {
             var eco = NewEco();
             eco.Maintain(true);
@@ -456,36 +401,52 @@ namespace OmenMon.Tests {
             Assert.True(eco.State.IsEmpty);
         }
 
-        // On exit the battery settings go back; GPU preferences are an explicit choice and stay
+        // On exit the battery settings go back, and nothing changes afterwards
         [Fact]
-        public void Exit_RestoresBoostAndRefresh_KeepsGpu_AndChangesNothingAfterwards() {
+        public void Exit_RestoresBoostAndRefresh_AndChangesNothingAfterwards() {
             this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
             var eco = NewEco();
             eco.Maintain(true);
-            eco.ReleaseGpu(new[] { "a.exe" });
             Assert.NotNull(eco.RestoreForExit());
             Assert.Equal(2u, this.plan.Dc[Balanced]);
             Assert.Equal(165, this.display.Hz);
-            Assert.Equal(EcoPlus.GpuPowerSaving, this.gpu.Get("a.exe"));
             Assert.Null(eco.Maintain(true));
             Assert.Equal(2u, this.plan.Dc[Balanced]);
             Assert.Equal(165, this.display.Hz);
-            Assert.Single(EcoPlusState.Load(StatePath).SavedGpu);
+            Assert.False(File.Exists(StatePath));
         }
 
         [Fact]
         public void RestoreAll_PutsEverythingBack_AsTheCliDoes() {
             this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
             NewEco().Maintain(true);
-            NewEco().ReleaseGpu(new[] { "a.exe" });
             this.options = new EcoPlusOptions { Enabled = false };
             var cli = NewEco();                  // a separate process, from the state file alone
             string done = cli.RestoreAll();
-            Assert.Contains("1 GPU preference(s) back", done);
+            Assert.Contains("boost on battery back to 2", done);
+            Assert.Contains("refresh back to 165 Hz", done);
             Assert.Equal(2u, this.plan.Dc[Balanced]);
             Assert.Equal(165, this.display.Hz);
-            Assert.Null(this.gpu.Get("a.exe"));
             Assert.False(File.Exists(StatePath));
+        }
+
+        // GPU preferences are Graphics apps' now: the lines an earlier Eco+ saved are kept
+        // (for GraphicsMigration) through every save, and RestoreAll leaves them alone
+        [Fact]
+        public void OldGpuLines_AreKeptThroughSaves_AndNotRestored() {
+            File.WriteAllText(StatePath, "gpu\ta.exe\tGpuPreference=2;\r\ngpu\tb.exe\t\r\n");
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            var eco = NewEco();
+            eco.Maintain(true);                  // saves boost and refresh
+            var again = EcoPlusState.Load(StatePath);
+            Assert.Equal(2u, again.SavedBoostDc[Balanced]);
+            Assert.Equal(2, again.SavedGpu.Count);
+            Assert.Equal("GpuPreference=2;", again.SavedGpu["a.exe"]);
+            Assert.Null(again.SavedGpu["b.exe"]);
+            this.options = new EcoPlusOptions { Enabled = false };
+            string done = NewEco().RestoreAll();
+            Assert.DoesNotContain("GPU", done);
+            Assert.Equal(2, EcoPlusState.Load(StatePath).SavedGpu.Count);
         }
 
         [Fact]
@@ -495,14 +456,7 @@ namespace OmenMon.Tests {
             Assert.Null(NewEco().RestoreAll());
             Assert.Equal(0, this.plan.Writes);
             Assert.Equal(0, this.display.Sets);
-            Assert.Empty(this.gpu.Values);
             Assert.False(File.Exists(StatePath));
-        }
-
-        [Fact]
-        public void Gpu_AlreadyPowerSaving_IsSkipped() {
-            this.gpu.Values["a.exe"] = EcoPlus.GpuPowerSaving;
-            Assert.Equal(0, NewEco().ReleaseGpu(new[] { "a.exe" }));
         }
 
         [Fact]
@@ -551,18 +505,6 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
-        public void FailedSave_LeavesGpuPreferencesAlone() {
-            this.gpu.Values["a.exe"] = "GpuPreference=2;";
-            var eco = NewEco();
-            BreakSaving();
-            Assert.Equal(0, eco.ReleaseGpu(new[] { "a.exe", "b.exe" }));
-            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
-            Assert.Null(this.gpu.Get("b.exe"));
-            Assert.Empty(eco.State.SavedGpu);
-            Assert.NotNull(eco.LastError);
-        }
-
-        [Fact]
         public void UnreadableState_IsKeptAsBad_AndLogged() {
             File.WriteAllText(StatePath, "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
             EcoPlusState s;
@@ -573,7 +515,7 @@ namespace OmenMon.Tests {
             Assert.False(s.Blocked);
             Assert.False(File.Exists(StatePath));
             Assert.Contains("{381b4222", File.ReadAllText(StatePath + ".bad"));
-            new EcoPlus(this.plan, this.gpu, this.display, s, () => this.options, () => this.now);
+            new EcoPlus(this.plan, this.display, s, () => this.options, () => this.now);
             Assert.Contains(".bad", LogText);
         }
 
