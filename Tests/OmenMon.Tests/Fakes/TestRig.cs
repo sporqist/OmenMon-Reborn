@@ -4,6 +4,7 @@
 // OmenMon-Reborn additions © 2026 seakyy
 
 using OmenMon.Hardware.Bios;
+using OmenMon.Hardware.Ec;
 using OmenMon.Hardware.Platform;
 using OmenMon.Library;
 
@@ -18,12 +19,15 @@ namespace OmenMon.Tests.Fakes {
     // An 8BAC assembled from simulated parts: the production Platform, FanArray, Fan,
     // EcComponent and WmiBiosTemperatureComponent classes over Fake8BacBios and
     // FakeEcRegisters. Sensor layout as on the real board: CPUT at EC 0xB2, GPTM at
-    // EC 0xB4, plus the BIOS 0x23 sensor.
-    public sealed class TestRig {
+    // EC 0xB4, plus the BIOS 0x23 sensor. With ecDriver, CPUT and GPTM read through the
+    // production EC path (HwEcRegisters, Hw.TryEcGetByte, EmbeddedControllerAbstract) over
+    // FakeEmbeddedController, which is then Hw.Ec until the rig is disposed.
+    public sealed class TestRig : IDisposable {
 
         public Fake8BacBios Bios { get; } = new Fake8BacBios();
         public FakeEcRegisters Ec { get; } = new FakeEcRegisters();
         public FakeSettings Settings { get; } = new FakeSettings();
+        public FakeEmbeddedController? Driver { get; }
         public BiosCtl BiosCtl { get; }
         public FanArray Fans { get; }
         public Platform Platform { get; }
@@ -33,10 +37,23 @@ namespace OmenMon.Tests.Fakes {
             Hw.Isolated = true;
         }
 
-        public TestRig() {
+        private readonly IEmbeddedController? savedEc;
+        private readonly int savedEcWaitSpinCount;
+
+        public TestRig(bool ecDriver = false) {
 
             Hw.Isolated = true;
             Config.LocaleInit();
+
+            IEcRegisters sensors = this.Ec;
+            if(ecDriver) {
+                this.Driver = new FakeEmbeddedController(this.Ec);
+                this.savedEc = Hw.Ec;
+                this.savedEcWaitSpinCount = Config.EcWaitSpinCount;
+                Hw.Ec = this.Driver;
+                Config.EcWaitSpinCount = Config.EcWaitLimit; // a failing wait spins, no 1 ms sleeps
+                sensors = HwEcRegisters.Instance;
+            }
 
             // Flat floor only, unless a test sets the warm curve itself
             Config.FanSafetyWarmCurve = "none";
@@ -73,9 +90,9 @@ namespace OmenMon.Tests.Fakes {
                 new EcComponent(p.SwitchReg, RW, B, int.MaxValue, this.Ec),
                 p.ManualValueOn, p.ManualValueOff, this.BiosCtl);
 
-            EcComponent cput = new EcTemperatureComponent(FakeEcRegisters.CpuTempRegister, Config.MaxBelievableTemperature, this.Ec);
+            EcComponent cput = new EcTemperatureComponent(FakeEcRegisters.CpuTempRegister, Config.MaxBelievableTemperature, sensors);
             cput.SetName("CPUT");
-            EcComponent gptm = new EcTemperatureComponent(FakeEcRegisters.GpuTempRegister, Config.MaxBelievableTemperature, this.Ec);
+            EcComponent gptm = new EcTemperatureComponent(FakeEcRegisters.GpuTempRegister, Config.MaxBelievableTemperature, sensors);
             gptm.SetName("GPTM");
             WmiBiosTemperatureComponent bios = new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, this.BiosCtl);
 
@@ -83,6 +100,14 @@ namespace OmenMon.Tests.Fakes {
                 new IPlatformReadComponent[] { cput, gptm, bios },
                 new bool[] { true, true, false });
 
+        }
+
+        // Puts back what the EC driver mode replaced
+        public void Dispose() {
+            if(this.Driver != null) {
+                Hw.Ec = this.savedEc!;
+                Config.EcWaitSpinCount = this.savedEcWaitSpinCount;
+            }
         }
 
         // Moves the simulated time

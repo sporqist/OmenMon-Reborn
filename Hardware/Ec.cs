@@ -24,6 +24,7 @@ namespace OmenMon.Hardware.Ec {
 
         // Read
         public byte ReadByte(byte register);
+        public bool TryReadByte(byte register, out byte value);
         public ushort ReadWord(byte register);
 
         // Write
@@ -68,16 +69,24 @@ namespace OmenMon.Hardware.Ec {
 #region Public Read & Write Methods
         // Wrapper to read a byte from an Embedded Controller register
         public virtual byte ReadByte(byte register) {
+            TryReadByte(register, out byte value);
+            return value;
+        }
+
+        // Same as ReadByte(), reporting whether the read succeeded. False when the EC
+        // handshake failed on every retry (issue #86: OutFull never set), so a sensor can
+        // tell a failed read from a genuine 0; the value is then 0, as ReadByte() returns.
+        public virtual bool TryReadByte(byte register, out byte value) {
             int count = 0;
-            byte value = 0;
+            value = 0;
             while(count < Config.EcRetryLimit) {
                 if(ReadByteImpl(register, out value)) {
                     EcTrace.RecordRead(register, value);
-                    return value;
+                    return true;
                 }
                 count++;
             }
-            return value;
+            return false;
         }
 
         // Wrapper to read a word (two bytes) from an Embedded Controller register

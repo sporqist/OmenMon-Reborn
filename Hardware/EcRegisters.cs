@@ -11,8 +11,9 @@ namespace OmenMon.Hardware.Ec {
     // components. This is a seam only: it sits above the EC transaction code
     // (EmbeddedController, Ring0/PawnIO, the Global\Access_EC mutex), which it
     // does not replace. Every call reports whether it actually ran — false means
-    // the EC lock could not be obtained (or there is no EC), so callers can tell
-    // a failed read from a genuine zero.
+    // the EC lock could not be obtained (or there is no EC), or for a byte read that
+    // the EC handshake failed on every retry, so callers can tell a failed read from
+    // a genuine zero.
     public interface IEcRegisters {
 
         public bool TryReadByte(byte register, out byte value);
