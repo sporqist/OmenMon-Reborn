@@ -557,6 +557,7 @@ namespace OmenMon.AppGui {
                 ((ToolStripMenuItem) sender).Name.Remove(0, P_GPU_REFRESH.Length)
                 == S_GPU_REFRESH_HIGH ?
                     Config.PresetRefreshRateHigh : Config.PresetRefreshRateLow);
+            Context.Op?.EcoPlus.NoteRefreshSetByUser();
 
             // Update the menu section
             UpdateGpuRefresh();

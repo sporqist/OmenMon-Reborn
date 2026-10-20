@@ -186,6 +186,11 @@ namespace OmenMon.AppGui {
             // Register the power-mode change event handler
             SystemEvents.PowerModeChanged += EventPowerChange;
 
+            // Eco+: Windows puts the displays' saved modes back when one is plugged in
+            // or out, which undoes a dynamic refresh-rate change
+            this.EcoPlusDisplayCount = DisplayRate.ActiveCount();
+            SystemEvents.DisplaySettingsChanged += EventDisplayChange;
+
             // Battery-glitch hibernation guard — issue #59. Records the
             // baseline Windows-reported battery percentage now so the very
             // next timer tick has something to compare against; nothing
@@ -236,6 +241,7 @@ namespace OmenMon.AppGui {
 
             // Unregister the power-mode change event handler
             SystemEvents.PowerModeChanged -= EventPowerChange;
+            SystemEvents.DisplaySettingsChanged -= EventDisplayChange;
 
             // Stop receiving power event notifications
             Gui.UnregisterSuspendResumeNotification();
@@ -269,6 +275,10 @@ namespace OmenMon.AppGui {
 
         // Handles a power-mode change event
         private void EventPowerChange(object sender, PowerModeChangedEventArgs e) {
+
+            // Eco+: after a resume Windows puts the displays' saved modes back
+            if(e.Mode == PowerModes.Resume)
+                try { this.Op?.EcoPlus.NoteDisplayReset(); } catch { }
 
             // Only respond to status change events,
             // which excludes Resume and Suspend
@@ -325,6 +335,20 @@ namespace OmenMon.AppGui {
             // is no timer to toggle here.
             this.Monitor?.RequestPowerApply();
 
+        }
+
+        // Handles a display settings change (any thread): only a change in the number of
+        // active displays counts for Eco+, a refresh-rate change by the user does not
+        private volatile int EcoPlusDisplayCount;
+
+        private void EventDisplayChange(object sender, EventArgs e) {
+            try {
+                int count = DisplayRate.ActiveCount();
+                if(count != this.EcoPlusDisplayCount) {
+                    this.EcoPlusDisplayCount = count;
+                    this.Op?.EcoPlus.NoteDisplayReset();
+                }
+            } catch { }
         }
 
         // Handles a timer tick

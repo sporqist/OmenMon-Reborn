@@ -26,11 +26,21 @@ namespace OmenMon.Tests {
             public void Remove(string app) { this.Values.Remove(app); }
         }
 
+        // The internal panel ("panel") and any other displays; a display not in Rates is not active
         private sealed class FakeDisplay : IDisplayRate {
-            public int Hz = 165;
+            public readonly Dictionary<string, int> Rates = new Dictionary<string, int> { ["panel"] = 165 };
+            public string? PanelId = "panel";
             public int Sets;
-            public int Current() { return this.Hz; }
-            public bool SetDynamic(int hz) { if(hz != this.Hz) this.Sets++; this.Hz = hz; return true; }
+            public bool Fail;
+            public int Hz { get { return this.Rates["panel"]; } set { this.Rates["panel"] = value; } }
+            public string Panel() { return this.PanelId != null && this.Rates.ContainsKey(this.PanelId) ? this.PanelId : null!; }
+            public int Current(string d) { return d != null && this.Rates.TryGetValue(d, out int v) ? v : 0; }
+            public bool SetDynamic(string d, int hz) {
+                if(this.Fail || d == null || !this.Rates.ContainsKey(d)) return false;
+                if(this.Rates[d] != hz) this.Sets++;
+                this.Rates[d] = hz;
+                return true;
+            }
         }
 
         private static readonly Guid Balanced = new Guid("381b4222-f694-41f0-9685-ff5bb260df2e");
@@ -215,6 +225,159 @@ namespace OmenMon.Tests {
             this.options = new EcoPlusOptions { Enabled = false };
             eco.Maintain(false);
             Assert.Equal(165, this.display.Hz);
+        }
+
+        // Once per battery period: a rate someone else set is theirs
+        [Fact]
+        public void Refresh_RaisedByTheUserOnBattery_IsLeftAlone_UntilThePowerSourceChanges() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            this.display.Hz = 165;               // tray: 165 Hz to watch a video
+            Tick(eco, true, 600);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Equal(1, this.display.Sets);
+            Assert.Null(eco.State.RefreshBefore);
+            Tick(eco, false, 300);               // plugged in: nothing to put back
+            Assert.Equal(165, this.display.Hz);
+            Tick(eco, true, 121);                // the next battery period lowers again
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(2, this.display.Sets);
+        }
+
+        [Fact]
+        public void Refresh_PresetOnBattery_IsNotOverriddenOnAc() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Hz = 48;                // a preset or Windows Settings
+            Tick(eco, true, 60);
+            Tick(eco, false, 300);
+            Assert.Equal(48, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_SetByTheUser_EvenToTheSameRate_IsNotPutBack() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            eco.NoteRefreshSetByUser();          // the Eco preset: 60 Hz saved as the mode
+            Assert.Null(eco.State.RefreshBefore);
+            Tick(eco, false, 300);
+            Assert.Equal(60, this.display.Hz);
+            Assert.Contains("set by the user", LogText);
+        }
+
+        [Fact]
+        public void Refresh_ChangedWhileNotRunning_IsNotRestored() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            var again = NewEco();                // OmenMon restarted; meanwhile the user set 144 Hz
+            this.display.Hz = 144;
+            string done = null!;
+            for(int i = 0; i < 130; i++) { done = again.Maintain(false) ?? done; this.now = this.now.AddSeconds(1); }
+            Assert.Equal(144, this.display.Hz);
+            Assert.Null(again.State.RefreshBefore);
+            Assert.Contains("left at 144 Hz", done);
+        }
+
+        [Fact]
+        public void Refresh_WindowsResetOnResume_IsLoweredAgainOnce() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Hz = 165;               // resume from sleep: Windows put the saved mode back
+            eco.NoteDisplayReset();
+            Tick(eco, true, 5);
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(2, this.display.Sets);
+            this.display.Hz = 165;               // again in the same period: left alone
+            eco.NoteDisplayReset();
+            Tick(eco, true, 60);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_AfterARebootOnBattery_IsLoweredAgain_AndRestoredOnAc() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Hz = 165;               // rebooted: the saved mode is back
+            var again = NewEco();
+            Tick(again, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            Tick(again, false, 121);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(again.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_OnlyThePanelIsChanged_NotAnotherDisplay() {
+            this.display.Rates["wall"] = 144;    // LED wall output
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            Assert.Equal(60, this.display.Hz);
+            Assert.Equal(144, this.display.Rates["wall"]);
+            Assert.Equal("panel", eco.State.RefreshDisplay);
+            Assert.Equal(60, eco.State.RefreshSet);
+        }
+
+        [Fact]
+        public void Refresh_PanelGone_IsNotRestoredOnAnotherDisplay() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Rates.Remove("panel");  // lid closed, only the external display left
+            this.display.Rates["wall"] = 60;
+            string done = null!;
+            for(int i = 0; i < 130; i++) { done = eco.Maintain(false) ?? done; this.now = this.now.AddSeconds(1); }
+            Assert.Equal(60, this.display.Rates["wall"]);
+            Assert.Null(eco.State.RefreshBefore);
+            Assert.Contains("not active", done);
+        }
+
+        [Fact]
+        public void Refresh_NoPanel_NothingIsLowered() {
+            this.display.PanelId = null;
+            this.display.Rates["wall"] = 144;
+            var eco = HeldEco();
+            Tick(eco, true, 200);
+            Assert.Equal(144, this.display.Rates["wall"]);
+            Assert.Equal(0, this.display.Sets);
+        }
+
+        [Fact]
+        public void Refresh_FailedRestore_IsRetried_ThenDropped() {
+            var eco = HeldEco();
+            Tick(eco, true, 121);
+            this.display.Fail = true;
+            Tick(eco, false, 121);
+            Assert.NotNull(eco.State.RefreshBefore);
+            Tick(eco, false, 3);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void Refresh_OldStateLine_IsRestoredWhileStillLower() {
+            File.WriteAllText(StatePath, "refresh\t165\r\n");
+            this.display.Hz = 60;
+            var eco = NewEco();
+            Assert.Null(eco.State.RefreshDisplay);
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(false);
+            Assert.Equal(165, this.display.Hz);
+
+            File.WriteAllText(StatePath, "refresh\t165\r\n");
+            NewEco().Maintain(false);            // already back at 165: nothing to do
+            Assert.Equal(1, this.display.Sets);
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
+        public void State_KeepsTheRateSetAndTheDisplay() {
+            var s = new EcoPlusState(StatePath) { RefreshBefore = 165, RefreshSet = 60, RefreshDisplay = @"\\?\DISPLAY#BOE0B7C#4&1&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}" };
+            Assert.True(s.Save());
+            var t = EcoPlusState.Load(StatePath);
+            Assert.Equal(165, t.RefreshBefore);
+            Assert.Equal(60, t.RefreshSet);
+            Assert.Equal(s.RefreshDisplay, t.RefreshDisplay);
         }
 
         [Fact]

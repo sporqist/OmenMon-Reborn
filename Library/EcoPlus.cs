@@ -21,7 +21,10 @@ namespace OmenMon.Library {
     //    the display's mode) and put back on AC or when Eco+ is turned off. Each change
     //    blanks the panel for about a second, so it waits until the power source has been
     //    stable for RefreshHoldSeconds: on 8BAC a train socket dropping out for 5 s to
-    //    2 min, 18 times in a day, turned every drop into two black screens.
+    //    2 min, 18 times in a day, turned every drop into two black screens. Only the
+    //    internal panel is changed, at most once per battery period, and the original is
+    //    put back only on that panel and only while it still runs at the rate Eco+ set:
+    //    a rate the user or a preset chose since is left as it is.
     //  * Per-app GPU preference "power saving" (HKCU DirectX UserGpuPreferences) for the
     //    apps that keep the discrete GPU awake. Explicit, not tied to battery: the apps
     //    read it when they start. The original values are kept and can be restored.
@@ -96,6 +99,49 @@ namespace OmenMon.Library {
         // the caller keeps calling Maintain until it is decided
         public bool RefreshPending { get; private set; }
 
+        // The refresh rate is decided once per power-source period (from one change of
+        // the power source to the next, or until the options change): Eco+ lowers it at
+        // most once, and a rate that is no longer what Eco+ set belongs to whoever set it
+        // (the user, a preset). Only when Windows itself put the saved mode back (after
+        // a resume or a display being plugged in or out, see NoteDisplayReset) is it
+        // lowered again, once per period.
+        private bool refreshDecided, refreshReapplied;
+        private DateTime? displayResetAt;
+        private const int DisplayResetSeconds = 600;
+        private int refreshRestoreFailures;
+        private bool? lastEnabled;
+        private int lastRefreshRate = -1;
+
+        private void NewPeriod() {
+            this.refreshDecided = false;
+            this.refreshReapplied = false;
+        }
+
+        private bool DisplayWasReset(DateTime now, int holdSeconds) {
+            return this.displayResetAt.HasValue && (now - this.displayResetAt.Value).TotalSeconds <= DisplayResetSeconds + Math.Max(0, holdSeconds);
+        }
+
+        // Windows may have put the displays' saved modes back (resume from sleep, a
+        // display plugged in or out); a dynamic rate change does not survive that
+        public void NoteDisplayReset() {
+            lock(this.sync)
+                this.displayResetAt = this.clock();
+        }
+
+        // The user set the refresh rate (a preset or the tray menu, saved as the display's
+        // mode): it is theirs, even if it happens to be the rate Eco+ set, so it is not
+        // put back and not lowered again in this period
+        public void NoteRefreshSetByUser() {
+            lock(this.sync) {
+                this.refreshDecided = true;
+                if(!this.state.RefreshBefore.HasValue)
+                    return;
+                Log("refresh set by the user: not put back to " + this.state.RefreshBefore.Value + " Hz");
+                ForgetRefresh();
+                SaveRestored();
+            }
+        }
+
         // Brings the settings in line with the options and the power source. Called on
         // start, on a power source change and periodically (the user may switch power
         // schemes). Returns a short description of what changed, or null.
@@ -106,8 +152,19 @@ namespace OmenMon.Library {
 
                 DateTime now = this.clock();
                 if(this.lineOnBattery != onBattery) {
+                    bool first = !this.lineOnBattery.HasValue;
                     this.lineOnBattery = onBattery;
                     this.lineSince = now;
+                    NewPeriod();
+                    // A rate Eco+ set before this start may have been reset by a reboot
+                    if(first)
+                        this.displayResetAt = now;
+                }
+                if(this.lastEnabled != o.Enabled || this.lastRefreshRate != o.RefreshRateOnBattery) {
+                    if(this.lastEnabled.HasValue)
+                        NewPeriod();
+                    this.lastEnabled = o.Enabled;
+                    this.lastRefreshRate = o.RefreshRateOnBattery;
                 }
                 bool stable = (now - this.lineSince).TotalSeconds >= Math.Max(0, o.RefreshHoldSeconds);
                 RefreshPending = false;
@@ -143,44 +200,135 @@ namespace OmenMon.Library {
                 }
 
                 // Refresh rate on battery, once the power source has been stable
-                if(onBattery && o.RefreshRateOnBattery > 0) {
-                    int current = this.display.Current();
-                    if(current > o.RefreshRateOnBattery) {
-                        if(!stable)
-                            RefreshPending = true;
-                        else {
-                            bool fresh = !this.state.RefreshBefore.HasValue;
-                            if(fresh) {
-                                this.state.RefreshBefore = current;
-                                if(!Save("the refresh rate")) {
-                                    this.state.RefreshBefore = null;
-                                    return done.Count > 0 ? string.Join(", ", done) : null;
-                                }
-                            }
-                            if(this.display.SetDynamic(o.RefreshRateOnBattery))
-                                done.Add("refresh " + current + " -> " + o.RefreshRateOnBattery + " Hz");
-                            else if(fresh) {
-                                this.state.RefreshBefore = null;
-                                Save("the refresh rate");
-                            }
-                        }
-                    }
-                } else if(this.state.RefreshBefore.HasValue) {
+                if(onBattery && o.RefreshRateOnBattery > 0)
+                    LowerRefresh(o.RefreshRateOnBattery, o.RefreshHoldSeconds, stable, now, done);
+                else if(this.state.RefreshBefore.HasValue) {
                     // Plugged in (and stable), or the option was turned off: put the rate back
-                    if(o.RefreshRateOnBattery > 0 && !stable) {
+                    if(o.RefreshRateOnBattery > 0 && !stable)
                         RefreshPending = true;
-                        return done.Count > 0 ? string.Join(", ", done) : null;
-                    }
-                    int before = this.state.RefreshBefore.Value;
-                    if(this.display.SetDynamic(before)) {
-                        this.state.RefreshBefore = null;
-                        SaveRestored();
-                        done.Add("refresh back to " + before + " Hz");
-                    }
+                    else
+                        RestoreRefresh(done);
                 }
 
                 return done.Count > 0 ? string.Join(", ", done) : null;
             }
+        }
+
+        // The display the saved rate belongs to (a state file from before display
+        // identities were kept names none: the panel then)
+        private string RefreshDisplay() {
+            return this.state.RefreshDisplay ?? this.display.Panel();
+        }
+
+        // Whether a display's rate is still the one Eco+ set (unknown for a state file
+        // from before that was kept: then anything below the original)
+        private bool IsEcoPlusRate(int current) {
+            return this.state.RefreshSet > 0 ? current == this.state.RefreshSet : current < this.state.RefreshBefore.GetValueOrDefault();
+        }
+
+        private string SetRateText() {
+            return this.state.RefreshSet > 0 ? this.state.RefreshSet + " Hz" : "lower";
+        }
+
+        private void ForgetRefresh() {
+            this.state.RefreshBefore = null;
+            this.state.RefreshSet = 0;
+            this.state.RefreshDisplay = null;
+            this.refreshRestoreFailures = 0;
+        }
+
+        private void LowerRefresh(int target, int holdSeconds, bool stable, DateTime now, List<string> done) {
+
+            // A rate Eco+ set earlier, in this period or before a restart
+            if(this.state.RefreshBefore.HasValue) {
+                string id = RefreshDisplay();
+                int current = id != null ? this.display.Current(id) : 0;
+                if(current <= 0) {
+                    // That display is off or gone; if it comes back, it is in its saved mode
+                    this.displayResetAt = now;
+                    return;
+                }
+                if(IsEcoPlusRate(current)) {
+                    this.refreshDecided = true;
+                    return;
+                }
+                if(current == this.state.RefreshBefore.Value && DisplayWasReset(now, holdSeconds) && !this.refreshReapplied) {
+                    // Windows put the saved mode back: lowered again, once per period
+                    if(!stable) {
+                        RefreshPending = true;
+                        return;
+                    }
+                    this.refreshReapplied = true;
+                    this.refreshDecided = true;
+                    this.displayResetAt = null;
+                    if(this.display.SetDynamic(id, target)) {
+                        if(this.state.RefreshSet != target) {
+                            this.state.RefreshSet = target;
+                            SaveRestored();
+                        }
+                        done.Add("refresh " + current + " -> " + target + " Hz again (Windows had put " + current + " Hz back)");
+                    }
+                    return;
+                }
+                // Someone else set this rate: it is theirs, left alone until the power source changes
+                done.Add("refresh now " + current + " Hz, not the " + SetRateText() + " Eco+ set: left as it is");
+                ForgetRefresh();
+                SaveRestored();
+                this.refreshDecided = true;
+                return;
+            }
+
+            if(this.refreshDecided)
+                return;
+            string panel = this.display.Panel();
+            int rate = panel != null ? this.display.Current(panel) : 0;
+            if(rate <= 0)
+                return;   // no internal panel active (lid closed): nothing to lower
+            if(rate <= target) {
+                if(stable)
+                    this.refreshDecided = true;
+                return;
+            }
+            if(!stable) {
+                RefreshPending = true;
+                return;
+            }
+            this.refreshDecided = true;
+
+            // The original, the rate set and the display, on disk before the change
+            this.state.RefreshBefore = rate;
+            this.state.RefreshSet = target;
+            this.state.RefreshDisplay = panel;
+            if(!Save("the refresh rate")) {
+                ForgetRefresh();
+                return;
+            }
+            if(this.display.SetDynamic(panel, target))
+                done.Add("refresh " + rate + " -> " + target + " Hz");
+            else {
+                ForgetRefresh();
+                SaveRestored();
+            }
+        }
+
+        // Puts the saved rate back, but only on the display it came from and only while
+        // that display still runs at the rate Eco+ set; otherwise the entry is dropped
+        private void RestoreRefresh(List<string> done) {
+            int before = this.state.RefreshBefore.Value;
+            string id = RefreshDisplay();
+            int current = id != null ? this.display.Current(id) : 0;
+            if(current <= 0)
+                done.Add("refresh not put back to " + before + " Hz: the display Eco+ changed is not active");
+            else if(!IsEcoPlusRate(current))
+                done.Add("refresh left at " + current + " Hz, not the " + SetRateText() + " Eco+ set: not put back to " + before + " Hz");
+            else if(this.display.SetDynamic(id, before))
+                done.Add("refresh back to " + before + " Hz");
+            else if(++this.refreshRestoreFailures >= 3)
+                done.Add("refresh could not be put back to " + before + " Hz: given up");
+            else
+                return;   // tried again on the next call
+            ForgetRefresh();
+            SaveRestored();
         }
 
         // Writes back every boost value and the refresh rate Eco+ changed
@@ -193,17 +341,16 @@ namespace OmenMon.Library {
             List<string> done = new List<string>();
             if(!this.state.Reload())
                 return null;
+            NewPeriod();
             foreach(KeyValuePair<Guid, uint> saved in this.state.SavedBoostDc.ToList()) {
                 this.plan.WriteBoostDc(saved.Key, saved.Value);
                 this.state.SavedBoostDc.Remove(saved.Key);
                 done.Add("boost on battery back to " + saved.Value);
             }
-            if(this.state.RefreshBefore.HasValue && this.display.SetDynamic(this.state.RefreshBefore.Value)) {
-                done.Add("refresh back to " + this.state.RefreshBefore.Value + " Hz");
-                this.state.RefreshBefore = null;
-            }
             if(done.Count > 0)
                 SaveRestored();
+            if(this.state.RefreshBefore.HasValue)
+                RestoreRefresh(done);
             return done.Count > 0 ? string.Join(", ", done) : null;
         }
 
@@ -298,7 +445,9 @@ namespace OmenMon.Library {
 
     // The original values Eco+ will restore. Text file, one value per line:
     //   boost <TAB> {scheme GUID} <TAB> value
-    //   refresh <TAB> Hz
+    //   refresh <TAB> original Hz <TAB> Hz Eco+ set <TAB> display
+    //     (the display as IDisplayRate names it; files from before a display was
+    //     kept have only the original Hz)
     //   gpu <TAB> app <TAB> original value (empty = the app had no preference)
     //
     // Eco+ saves it before it changes Windows, and changes nothing if the save fails.
@@ -312,6 +461,8 @@ namespace OmenMon.Library {
         public readonly Dictionary<Guid, uint> SavedBoostDc = new Dictionary<Guid, uint>();
         public readonly Dictionary<string, string> SavedGpu = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public int? RefreshBefore;
+        public int RefreshSet;              // the rate Eco+ set, 0 = not known
+        public string RefreshDisplay;       // the display it was set on, null = not known
 
         private readonly string path;
 
@@ -378,12 +529,19 @@ namespace OmenMon.Library {
             this.SavedBoostDc.Clear();
             this.SavedGpu.Clear();
             this.RefreshBefore = null;
+            this.RefreshSet = 0;
+            this.RefreshDisplay = null;
             foreach(string line in lines) {
                 string[] f = line.Split('\t');
                 if(f.Length == 3 && f[0] == "boost" && Guid.TryParse(f[1], out Guid g) && uint.TryParse(f[2], out uint v))
                     this.SavedBoostDc[g] = v;
-                else if(f.Length == 2 && f[0] == "refresh" && int.TryParse(f[1], out int hz) && hz > 0)
+                else if((f.Length == 2 || f.Length == 4) && f[0] == "refresh" && int.TryParse(f[1], out int hz) && hz > 0) {
                     this.RefreshBefore = hz;
+                    if(f.Length == 4 && int.TryParse(f[2], out int set) && set > 0 && f[3].Length > 0) {
+                        this.RefreshSet = set;
+                        this.RefreshDisplay = f[3];
+                    }
+                }
                 else if(f.Length == 3 && f[0] == "gpu" && f[1].Length > 0)
                     this.SavedGpu[f[1]] = f[2].Length > 0 ? f[2] : null;
             }
@@ -429,7 +587,8 @@ namespace OmenMon.Library {
                 foreach(KeyValuePair<Guid, uint> b in this.SavedBoostDc)
                     sb.Append("boost\t").Append(b.Key.ToString("B")).Append('\t').Append(b.Value).Append("\r\n");
                 if(this.RefreshBefore.HasValue)
-                    sb.Append("refresh\t").Append(this.RefreshBefore.Value).Append("\r\n");
+                    sb.Append("refresh\t").Append(this.RefreshBefore.Value).Append('\t').Append(this.RefreshSet)
+                      .Append('\t').Append(this.RefreshDisplay ?? "").Append("\r\n");
                 foreach(KeyValuePair<string, string> g in this.SavedGpu)
                     sb.Append("gpu\t").Append(g.Key).Append('\t').Append(g.Value ?? "").Append("\r\n");
                 File.WriteAllText(TempPath, sb.ToString(), new UTF8Encoding(false));
@@ -467,8 +626,9 @@ namespace OmenMon.Library {
     }
 
     public interface IDisplayRate {
-        int Current();
-        bool SetDynamic(int hz);                // not saved as the display's mode
+        string Panel();                         // the display Eco+ changes (the internal panel), null if none is active
+        int Current(string display);            // its rate now, 0 if that display is not active
+        bool SetDynamic(string display, int hz);   // not saved as the display's mode
     }
 
 }
