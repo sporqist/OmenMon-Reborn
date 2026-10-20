@@ -166,6 +166,25 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_FileBrokenSinceLoad_IsRewrittenWithEverythingLoaded() {
+            File.WriteAllText(File_, Fixture.Replace("<AutoConfig>false</AutoConfig>",
+                "<AutoConfig>false</AutoConfig><FanProgramDefault>Alpha</FanProgramDefault>"));
+            Config.Load();
+
+            // A hand edit leaves the file unreadable while the application runs
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            XmlDocument xml = SaveAndRead();
+            Assert.Single(Directory.GetFiles(Dir, "OmenMon.xml.unreadable-*.bak"));
+            Assert.Equal("Alpha", Value(xml, "FanProgramDefault"));
+            Assert.NotNull(Program(xml, "Alpha"));
+            Assert.NotNull(Program(xml, "Beta"));
+            Assert.Single(Models(xml, "8bac").Cast<XmlNode>());
+            Assert.Equal(2, xml.SelectNodes("OmenMon/Config/ColorPresets/Preset")!.Count);
+            Assert.NotEmpty(xml.SelectNodes("OmenMon/Config/Temperature/Sensor")!.Cast<XmlNode>());
+            Assert.Null(Value(xml, "AutoConfig")); // a default
+        }
+
+        [Fact]
         public void Save_ShippedConfig_RoundTripLosesNothing() {
             string root = AppContext.BaseDirectory;
             while(!File.Exists(Path.Combine(root, "OmenMon.xml")))

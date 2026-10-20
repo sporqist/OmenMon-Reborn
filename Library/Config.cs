@@ -879,13 +879,15 @@ namespace OmenMon.Library {
                 // Start with a pre-defined template
                 xml.LoadXml(Config.XmlTemplate);
 
-            // Scalar settings: only what changed (see SaveScalars())
+            // Scalar settings: only what changed (see SaveScalars()); starting from the
+            // template, all that differs from the defaults, and all collection entries
             Dictionary<string, string> scalarsSaved = SaveScalars(xml, fromFile);
             RemoveStrayCustomPreset(xml);
 
             // Color presets
             MergeEntries(xml, XmlPrefixColorPresets,
-                XmlElementColorPreset, KeyOfColorPreset, ColorPreset, LoadedColorPresets, SnapshotColorPresets,
+                XmlElementColorPreset, KeyOfColorPreset, ColorPreset, LoadedColorPresets,
+                fromFile ? SnapshotColorPresets : null,
                 node => {
                     string name; BiosData.ColorTable table;
                     return TryParseColorPreset(node, out name, out table) ? BuildColorPreset(xml, name, table) : null; },
@@ -893,7 +895,8 @@ namespace OmenMon.Library {
 
             // Fan programs
             MergeEntries(xml, XmlPrefixFanPrograms,
-                XmlElementFanProgram, KeyOfFanProgram, FanProgram, LoadedFanPrograms, SnapshotFanPrograms,
+                XmlElementFanProgram, KeyOfFanProgram, FanProgram, LoadedFanPrograms,
+                fromFile ? SnapshotFanPrograms : null,
                 node => {
                     FanProgramData program;
                     return TryParseFanProgram(node, out program) ? BuildFanProgram(xml, program.Name, program) : null; },
@@ -909,12 +912,14 @@ namespace OmenMon.Library {
                 sensorsInFile |= canonicalSensor((XmlElement) node) != null;
             if(LoadedSensors.Count > 0 || !sensorsInFile)
                 MergeEntries(xml, XmlPrefixTemperature,
-                    XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors, SnapshotSensors,
+                    XmlElementTemperatureSensor, KeyOfSensor, TemperatureSensor, LoadedSensors,
+                    fromFile ? SnapshotSensors : null,
                     canonicalSensor, (name, sensor) => BuildSensor(xml, name, sensor));
 
             // Model database entries
             MergeEntries(xml, XmlPrefixModels,
-                XmlElementModel, KeyOfModel, Models, LoadedModels, SnapshotModels,
+                XmlElementModel, KeyOfModel, Models, LoadedModels,
+                fromFile ? SnapshotModels : null,
                 node => {
                     OmenMon.Hardware.Platform.PlatformPreset p;
                     return TryParseModel(node, out p) ? BuildModel(xml, p) : null; },
@@ -1082,9 +1087,10 @@ namespace OmenMon.Library {
                 string value = scalar.Value(), fallback = ScalarDefaults[scalar.Path], loaded;
                 saved[scalar.Path] = value;
 
-                // Before any Load(), compare against the defaults; a value that was not
-                // loaded from its own path has no entry and is always saved
-                if(ScalarsLoaded == null)
+                // Before any Load(), or when starting from the template, compare against
+                // the defaults; a value that was not loaded from its own path has no
+                // entry and is always saved
+                if(ScalarsLoaded == null || !fromFile)
                     loaded = fallback;
                 else if(!ScalarsLoaded.TryGetValue(scalar.Path, out loaded))
                     loaded = null;
