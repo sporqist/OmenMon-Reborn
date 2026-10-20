@@ -654,6 +654,10 @@ namespace OmenMon.Library {
         private static string XmlPrefixModels = XmlPrefix + XmlElementModels + "/"; // Slash
         private static string XmlPrefixModel = XmlPrefixModels + XmlElementModel; // No slash
 
+        // Custom preset location, and where earlier versions saved it by mistake
+        private const string XmlPathCustomPreset = "//OmenMon/CustomPreset/"; // Slash
+        private const string XmlPathCustomPresetStray = "OmenMon/n/CustomPreset/"; // Slash
+
         // Whether to skip the annoying Byte Order Mark (BOM) when saving the XML configuration
         private const bool XmlSaveBom = false;
 

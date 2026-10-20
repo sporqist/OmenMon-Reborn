@@ -226,6 +226,81 @@ namespace OmenMon.Tests {
                 n => ((XmlElement) n).GetAttribute("ProductId").Equals("8bac", StringComparison.OrdinalIgnoreCase));
         }
 
+        private static void ResetCustomPreset() {
+            Config.CustomPresetFanMode = "Default";
+            Config.CustomPresetGpuPower = "Medium";
+            Config.CustomPresetMaxRpm = 0;
+            Config.CustomPresetCpuLevel = 0;
+            Config.CustomPresetGpuLevel = 0;
+        }
+
+        private static void AssertCustomPreset(string mode, string power, int maxRpm, byte cpu, byte gpu) {
+            Assert.Equal(mode, Config.CustomPresetFanMode);
+            Assert.Equal(power, Config.CustomPresetGpuPower);
+            Assert.Equal(maxRpm, Config.CustomPresetMaxRpm);
+            Assert.Equal(cpu, Config.CustomPresetCpuLevel);
+            Assert.Equal(gpu, Config.CustomPresetGpuLevel);
+        }
+
+        [Fact]
+        public void CustomPreset_SurvivesSaveAndLoad() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Config.CustomPresetFanMode = "Performance";
+            Config.CustomPresetGpuPower = "Maximum";
+            Config.CustomPresetMaxRpm = 4500;
+            Config.CustomPresetCpuLevel = 40;
+            Config.CustomPresetGpuLevel = 43;
+
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("40", xml.SelectSingleNode("OmenMon/CustomPreset/Fan0Level")!.InnerText);
+            Assert.Null(xml.SelectSingleNode("OmenMon/n"));
+
+            ResetCustomPreset();
+            Config.Load();
+            AssertCustomPreset("Performance", "Maximum", 4500, 40, 43);
+        }
+
+        [Fact]
+        public void CustomPreset_StrayElement_IsReadAndMoved() {
+            // Where earlier versions saved it
+            File.WriteAllText(File_, Fixture.Replace("</OmenMon>",
+                "<n><CustomPreset><Mode>Performance</Mode><GpuPower>Minimum</GpuPower><MaxRpm>4000</MaxRpm>"
+                + "<Fan0Level>30</Fan0Level><Fan1Level>33</Fan1Level></CustomPreset></n></OmenMon>"));
+            ResetCustomPreset();
+            Config.Load();
+            AssertCustomPreset("Performance", "Minimum", 4000, 30, 33);
+
+            XmlDocument xml = SaveAndRead();
+            Assert.Null(xml.SelectSingleNode("OmenMon/n"));
+            Assert.Equal("33", xml.SelectSingleNode("OmenMon/CustomPreset/Fan1Level")!.InnerText);
+            ResetCustomPreset();
+            Config.Load();
+            AssertCustomPreset("Performance", "Minimum", 4000, 30, 33);
+        }
+
+        [Fact]
+        public void CustomPreset_StrayElement_WithOtherContent_IsKept() {
+            File.WriteAllText(File_, Fixture.Replace("</OmenMon>",
+                "<n><Other>keep</Other><CustomPreset><!-- note --><Fan0Level>30</Fan0Level></CustomPreset></n></OmenMon>"));
+            Config.Load();
+            XmlDocument xml = SaveAndRead();
+            Assert.Equal("keep", xml.SelectSingleNode("OmenMon/n/Other")!.InnerText);
+            Assert.NotNull(xml.SelectSingleNode("OmenMon/n/CustomPreset/comment()"));
+            Assert.Null(xml.SelectSingleNode("OmenMon/n/CustomPreset/Fan0Level"));
+            Assert.Equal("30", xml.SelectSingleNode("OmenMon/CustomPreset/Fan0Level")!.InnerText);
+        }
+
+        [Fact]
+        public void CustomPreset_CorrectLocation_WinsOverStray() {
+            File.WriteAllText(File_, Fixture.Replace("</OmenMon>",
+                "<CustomPreset><Fan0Level>45</Fan0Level></CustomPreset>"
+                + "<n><CustomPreset><Fan0Level>30</Fan0Level></CustomPreset></n></OmenMon>"));
+            ResetCustomPreset();
+            Config.Load();
+            Assert.Equal(45, Config.CustomPresetCpuLevel);
+        }
+
     }
 
 }

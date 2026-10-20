@@ -362,21 +362,29 @@ namespace OmenMon.Library {
                     if(TryGetString(xml, XmlPrefix + "FanProgramDefaultAlt", out text))
                         FanProgramDefaultAlt = text;
 
-                    string customFanMode = GetString(xml, "//OmenMon/CustomPreset/Mode");
+                    // Earlier versions saved the custom preset under a stray <OmenMon><n> element
+                    // (see SetPath()); read it from there if it is not where it belongs, and the
+                    // next save moves it
+                    string customPreset = XmlPathCustomPreset;
+                    if(xml.SelectSingleNode(XmlPathCustomPreset.TrimEnd('/')) == null
+                        && xml.SelectSingleNode(XmlPathCustomPresetStray.TrimEnd('/')) != null)
+                        customPreset = XmlPathCustomPresetStray;
+
+                    string customFanMode = GetString(xml, customPreset + "Mode");
                     if(!string.IsNullOrEmpty(customFanMode))
                         CustomPresetFanMode = customFanMode;
 
-                    string customGpuPower = GetString(xml, "//OmenMon/CustomPreset/GpuPower");
+                    string customGpuPower = GetString(xml, customPreset + "GpuPower");
                     if(!string.IsNullOrEmpty(customGpuPower))
                         CustomPresetGpuPower = customGpuPower;
 
-                    if(GetWord(xml, "//OmenMon/CustomPreset/MaxRpm", out value))
+                    if(GetWord(xml, customPreset + "MaxRpm", out value))
                         CustomPresetMaxRpm = value;
 
-                    if(GetWord(xml, "//OmenMon/CustomPreset/Fan0Level", out value) && value <= 100)
+                    if(GetWord(xml, customPreset + "Fan0Level", out value) && value <= 100)
                         CustomPresetCpuLevel = (byte) value;
 
-                    if(GetWord(xml, "//OmenMon/CustomPreset/Fan1Level", out value) && value <= 100)
+                    if(GetWord(xml, customPreset + "Fan1Level", out value) && value <= 100)
                         CustomPresetGpuLevel = (byte) value;
 
                     if(GetBool(xml, XmlPrefix + "FanProgramModeCheckFirst", out flag))
@@ -874,11 +882,12 @@ namespace OmenMon.Library {
             SetBool(xml, XmlPrefix + "TemperatureUseFahrenheit", TemperatureUseFahrenheit);
 
             // Save custom preset parameters directly inside OmenMon.xml
-            SetString(xml, "//OmenMon/CustomPreset/Mode", CustomPresetFanMode);
-            SetString(xml, "//OmenMon/CustomPreset/GpuPower", CustomPresetGpuPower);
-            SetUInt(xml, "//OmenMon/CustomPreset/MaxRpm", (uint) CustomPresetMaxRpm);
-            SetUInt(xml, "//OmenMon/CustomPreset/Fan0Level", CustomPresetCpuLevel);
-            SetUInt(xml, "//OmenMon/CustomPreset/Fan1Level", CustomPresetGpuLevel);
+            SetString(xml, XmlPathCustomPreset + "Mode", CustomPresetFanMode);
+            SetString(xml, XmlPathCustomPreset + "GpuPower", CustomPresetGpuPower);
+            SetUInt(xml, XmlPathCustomPreset + "MaxRpm", (uint) CustomPresetMaxRpm);
+            SetUInt(xml, XmlPathCustomPreset + "Fan0Level", CustomPresetCpuLevel);
+            SetUInt(xml, XmlPathCustomPreset + "Fan1Level", CustomPresetGpuLevel);
+            RemoveStrayCustomPreset(xml);
 
             // Color presets
             MergeEntries(xml, (XmlElement) SetPath(xml, XmlPrefixColorPresets),
@@ -1180,13 +1189,36 @@ namespace OmenMon.Library {
             return false;
         }
 
+        // Removes the custom preset values that earlier versions saved under a stray
+        // <OmenMon><n> element, now that they are saved where loading reads them; the
+        // elements are removed only once they hold nothing else
+        private static void RemoveStrayCustomPreset(XmlDocument xml) {
+            XmlNode stray = xml.SelectSingleNode(XmlPathCustomPresetStray.TrimEnd('/'));
+            if(stray == null)
+                return;
+            List<XmlNode> values = new List<XmlNode>();
+            foreach(string name in new[] { "Mode", "GpuPower", "MaxRpm", "Fan0Level", "Fan1Level" })
+                foreach(XmlNode node in stray.SelectNodes(name))
+                    values.Add(node);
+            foreach(XmlNode node in values)
+                stray.RemoveChild(node);
+            XmlNode n = stray.ParentNode;
+            if(!stray.HasChildNodes && ((XmlElement) stray).Attributes.Count == 0)
+                n.RemoveChild(stray);
+            if(!n.HasChildNodes && ((XmlElement) n).Attributes.Count == 0)
+                n.ParentNode.RemoveChild(n);
+        }
+
         // Ensures all intermediate nodes exist along an XML search path,
         // then returns the requested node as an object
         private static XmlNode SetPath(XmlDocument xml, XmlNode parent, string path) {
             XmlNode node;
 
             // Split the path into individual node names
-            string[] nodes = path.Trim('/').Split('/');
+            // Note: the remainder is taken from the trimmed path too; with the untrimmed
+            // one, "//OmenMon/CustomPreset/Mode" continued as "n/CustomPreset/Mode"
+            path = path.Trim('/');
+            string[] nodes = path.Split('/');
 
             // If the next node name is empty, return the parent node
             if(string.IsNullOrEmpty(nodes[0]))
