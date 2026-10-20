@@ -50,6 +50,9 @@ namespace OmenMon.Hardware.Platform {
         // Whether UpdateTemperature() holds the live EC lock across the sensor sweep
         private readonly bool BatchUnderEcLock = true;
 
+        // The fan-safety rules the guard applies (also the reading age limit used here)
+        public FanSafetyPolicy SafetyPolicy { get; private set; }
+
         // Resolved per-model register layout. Set once in the ctor (after InitSystem)
         // and shared by InitFans / InitTemperature. Falls back to PlatformPreset.Default
         // for fan-related fields when the product isn't in the model database; for the
@@ -170,8 +173,9 @@ namespace OmenMon.Hardware.Platform {
         // platform's validated CPU and GPU readings (cached: the guard never reads
         // hardware itself, the monitor and the program tick keep the readings current)
         private void InitFanSafety() {
+            this.SafetyPolicy = FanSafetyPolicy.FromConfig();
             this.Fans.Guard = new FanSafetyGuard(
-                FanSafetyPolicy.FromConfig(),
+                this.SafetyPolicy,
                 () => GetCpuReading(false),
                 () => GetGpuReading(false),
                 () => PlatformClock.UtcNow);
@@ -362,8 +366,9 @@ namespace OmenMon.Hardware.Platform {
         }
 
         // How old a temperature reading may be before the fan logic stops trusting it
-        public static TimeSpan ReadingMaxAge {
-            get { return TimeSpan.FromSeconds(Config.TemperatureMaxAge); }
+        // (the fan-safety policy's rule, so the guard and the platform agree on it)
+        public TimeSpan ReadingMaxAge {
+            get { return this.SafetyPolicy.ReadingMaxAge; }
         }
 
         // Highest fresh valid reading among the sensors with the given name

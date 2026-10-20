@@ -26,6 +26,11 @@ namespace OmenMon.Hardware.Platform {
         // Below this (fresh, valid CPU reading; GPU too if it reads) the floor is waived [°C]
         public int CoolTemperature = 50;
 
+        // How old a temperature reading may be before the fan logic stops trusting it:
+        // a stale reading is an unknown temperature, and unknown counts as hot. The one
+        // place this is decided; Platform judges its readings by it too.
+        public TimeSpan ReadingMaxAge = TimeSpan.FromSeconds(Config.TemperatureMaxAge);
+
         // How long a manual level below the floor (Fan Off, constant minimum) may stay
         // in effect even while cool
         public TimeSpan BelowFloorMaxDuration = TimeSpan.FromMinutes(15);
@@ -207,10 +212,10 @@ namespace OmenMon.Hardware.Platform {
         public int? Hottest() {
             DateTime now = this.Now;
             SensorReading cpu = this.cpuReading();
-            if(!cpu.IsFresh(now, Platform.ReadingMaxAge))
+            if(!cpu.IsFresh(now, this.Policy.ReadingMaxAge))
                 return null;
             SensorReading gpu = this.gpuReading();
-            return gpu.IsFresh(now, Platform.ReadingMaxAge) && gpu.Value > cpu.Value ? gpu.Value : cpu.Value;
+            return gpu.IsFresh(now, this.Policy.ReadingMaxAge) && gpu.Value > cpu.Value ? gpu.Value : cpu.Value;
         }
 
         // Whether the 0x10 keep-alive may run. False for HandBackQuietPeriod after a
@@ -225,10 +230,10 @@ namespace OmenMon.Hardware.Platform {
         public bool IsCool() {
             DateTime now = this.Now;
             SensorReading cpu = this.cpuReading();
-            if(!cpu.IsFresh(now, Platform.ReadingMaxAge) || cpu.Value >= this.Policy.CoolTemperature)
+            if(!cpu.IsFresh(now, this.Policy.ReadingMaxAge) || cpu.Value >= this.Policy.CoolTemperature)
                 return false;
             SensorReading gpu = this.gpuReading();
-            if(gpu.IsFresh(now, Platform.ReadingMaxAge) && gpu.Value >= this.Policy.CoolTemperature)
+            if(gpu.IsFresh(now, this.Policy.ReadingMaxAge) && gpu.Value >= this.Policy.CoolTemperature)
                 return false;
             return true;
         }

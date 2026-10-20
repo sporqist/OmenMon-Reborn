@@ -60,8 +60,20 @@ namespace OmenMon.Tests {
         public void StaleCpu_IsNeverCool() {
             var g = NewGuard();
             Cpu(40);
-            Advance(Platform.ReadingMaxAge + TimeSpan.FromSeconds(1));
+            Advance(g.Policy.ReadingMaxAge + TimeSpan.FromSeconds(1));
             Assert.Equal(Floor, g.Filter(Off));
+        }
+
+        [Fact]
+        public void StaleRule_ComesFromThePolicy() {
+            var g = new FanSafetyGuard(new FanSafetyPolicy { WarmCurve = new SafetyStep[0], ReadingMaxAge = TimeSpan.FromSeconds(10) },
+                () => this.cpu, () => this.gpu, () => this.now);
+            Cpu(40);
+            Advance(TimeSpan.FromSeconds(10));
+            Assert.Equal(Off, g.Filter(Off));
+            Advance(TimeSpan.FromSeconds(1));
+            Assert.Equal(Floor, g.Filter(Off));
+            Assert.Null(g.Hottest());
         }
 
         [Fact]
@@ -122,7 +134,7 @@ namespace OmenMon.Tests {
             var g = NewGuard();
             Cpu(40);
             g.RecordWrite(Off, g.Filter(Off));
-            Advance(Platform.ReadingMaxAge + TimeSpan.FromSeconds(1));
+            Advance(g.Policy.ReadingMaxAge + TimeSpan.FromSeconds(1));
             Assert.Equal(Floor, g.Supervise());
         }
 
