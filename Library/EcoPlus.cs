@@ -27,7 +27,8 @@ namespace OmenMon.Library {
     //    read it when they start. The original values are kept and can be restored.
     //
     // The original values live in a small state file, so they survive restarts and a
-    // crash between changing and restoring a value.
+    // crash between changing and restoring a value. Each original is saved there before
+    // its value is changed; a value whose original cannot be saved is not changed.
     public sealed class EcoPlus {
 
         // Values written
@@ -54,9 +55,42 @@ namespace OmenMon.Library {
             this.state = state;
             this.options = options;
             this.clock = clock ?? (() => DateTime.UtcNow);
+            if(state.LoadError != null)
+                Log(state.LoadError);
         }
 
         public EcoPlusState State { get { return this.state; } }
+
+        // Why the last change was not made (the originals could not be saved), or null
+        public string LastError { get; private set; }
+
+        // Errors go to the Eco+ log directly; what changed is returned to the caller
+        private void Log(string text) {
+            EcoPlusLog.Append(this.state.LogPath, DateTime.Now, "Eco+: " + text);
+        }
+
+        // Saves the state file; on failure the caller does not make its change. Logged
+        // once per run of failures, not on every periodic call.
+        private bool Save(string what) {
+            if(this.state.Save()) {
+                this.saveFailing = false;
+                return true;
+            }
+            this.LastError = "could not save the original value, so " + what + " was not changed: " + this.state.LastError;
+            if(!this.saveFailing)
+                Log(this.LastError);
+            this.saveFailing = true;
+            return false;
+        }
+
+        private bool saveFailing;
+
+        // Saves the state file after a restore. The value is back either way; if the file
+        // still lists it, a later restore finds it no longer as Eco+ set it and drops it.
+        private void SaveRestored() {
+            if(!this.state.Save())
+                Log("restored, but could not update the state file: " + this.state.LastError);
+        }
 
         // True while a refresh-rate change waits for the power source to be stable, so
         // the caller keeps calling Maintain until it is decided
@@ -77,6 +111,11 @@ namespace OmenMon.Library {
                 }
                 bool stable = (now - this.lineSince).TotalSeconds >= Math.Max(0, o.RefreshHoldSeconds);
                 RefreshPending = false;
+                this.LastError = null;
+
+                // While the saved originals cannot be read, nothing is changed or restored
+                if(!this.state.Reload())
+                    return null;
 
                 if(!o.Enabled) {
                     string restored = RestoreSettingsLocked();
@@ -88,12 +127,18 @@ namespace OmenMon.Library {
                 if(scheme != Guid.Empty) {
                     uint? dc = this.plan.ReadBoostDc(scheme);
                     if(dc.HasValue && dc.Value != BoostDisabled) {
-                        if(!this.state.SavedBoostDc.ContainsKey(scheme)) {
+                        bool saved = this.state.SavedBoostDc.ContainsKey(scheme);
+                        if(!saved) {
+                            // The original is on disk before the change, or there is no change
                             this.state.SavedBoostDc[scheme] = dc.Value;
-                            this.state.Save();
+                            saved = Save("turbo boost");
+                            if(!saved)
+                                this.state.SavedBoostDc.Remove(scheme);
                         }
-                        this.plan.WriteBoostDc(scheme, BoostDisabled);
-                        done.Add("boost off on battery (was " + dc.Value + ")");
+                        if(saved) {
+                            this.plan.WriteBoostDc(scheme, BoostDisabled);
+                            done.Add("boost off on battery (was " + dc.Value + ")");
+                        }
                     }
                 }
 
@@ -103,12 +148,21 @@ namespace OmenMon.Library {
                     if(current > o.RefreshRateOnBattery) {
                         if(!stable)
                             RefreshPending = true;
-                        else if(this.display.SetDynamic(o.RefreshRateOnBattery)) {
-                            if(!this.state.RefreshBefore.HasValue) {
+                        else {
+                            bool fresh = !this.state.RefreshBefore.HasValue;
+                            if(fresh) {
                                 this.state.RefreshBefore = current;
-                                this.state.Save();
+                                if(!Save("the refresh rate")) {
+                                    this.state.RefreshBefore = null;
+                                    return done.Count > 0 ? string.Join(", ", done) : null;
+                                }
                             }
-                            done.Add("refresh " + current + " -> " + o.RefreshRateOnBattery + " Hz");
+                            if(this.display.SetDynamic(o.RefreshRateOnBattery))
+                                done.Add("refresh " + current + " -> " + o.RefreshRateOnBattery + " Hz");
+                            else if(fresh) {
+                                this.state.RefreshBefore = null;
+                                Save("the refresh rate");
+                            }
                         }
                     }
                 } else if(this.state.RefreshBefore.HasValue) {
@@ -120,7 +174,7 @@ namespace OmenMon.Library {
                     int before = this.state.RefreshBefore.Value;
                     if(this.display.SetDynamic(before)) {
                         this.state.RefreshBefore = null;
-                        this.state.Save();
+                        SaveRestored();
                         done.Add("refresh back to " + before + " Hz");
                     }
                 }
@@ -137,6 +191,8 @@ namespace OmenMon.Library {
 
         private string RestoreSettingsLocked() {
             List<string> done = new List<string>();
+            if(!this.state.Reload())
+                return null;
             foreach(KeyValuePair<Guid, uint> saved in this.state.SavedBoostDc.ToList()) {
                 this.plan.WriteBoostDc(saved.Key, saved.Value);
                 this.state.SavedBoostDc.Remove(saved.Key);
@@ -147,7 +203,7 @@ namespace OmenMon.Library {
                 this.state.RefreshBefore = null;
             }
             if(done.Count > 0)
-                this.state.Save();
+                SaveRestored();
             return done.Count > 0 ? string.Join(", ", done) : null;
         }
 
@@ -155,18 +211,28 @@ namespace OmenMon.Library {
         // each app's original value the first time; returns how many were changed
         public int ReleaseGpu(IEnumerable<string> apps) {
             lock(this.sync) {
+                this.LastError = null;
                 int changed = 0;
+                if(!this.state.Reload()) {
+                    this.LastError = "the saved originals cannot be read, so nothing was changed";
+                    return 0;
+                }
                 foreach(string app in apps.Where(a => !string.IsNullOrWhiteSpace(a)).Distinct(StringComparer.OrdinalIgnoreCase)) {
                     string current = this.gpu.Get(app);
                     if(current == GpuPowerSaving)
                         continue;
-                    if(!this.state.SavedGpu.ContainsKey(app))
+                    // Each original is on disk before its app is changed; on a failed save
+                    // this app and the rest are left as they are
+                    if(!this.state.SavedGpu.ContainsKey(app)) {
                         this.state.SavedGpu[app] = current;   // null = had no preference
+                        if(!Save("the GPU preference of " + app)) {
+                            this.state.SavedGpu.Remove(app);
+                            break;
+                        }
+                    }
                     this.gpu.Set(app, GpuPowerSaving);
                     changed++;
                 }
-                if(changed > 0)
-                    this.state.Save();
                 return changed;
             }
         }
@@ -175,6 +241,8 @@ namespace OmenMon.Library {
         public int RestoreGpu() {
             lock(this.sync) {
                 int restored = 0;
+                if(!this.state.Reload())
+                    return 0;
                 foreach(KeyValuePair<string, string> saved in this.state.SavedGpu.ToList()) {
                     if(saved.Value == null)
                         this.gpu.Remove(saved.Key);
@@ -184,7 +252,7 @@ namespace OmenMon.Library {
                     restored++;
                 }
                 if(restored > 0)
-                    this.state.Save();
+                    SaveRestored();
                 return restored;
             }
         }
@@ -220,7 +288,10 @@ namespace OmenMon.Library {
                     File.WriteAllLines(path, lines.Skip(lines.Length / 2), new UTF8Encoding(false));
                 }
                 File.AppendAllText(path, time.ToString("yyyy-MM-dd HH:mm:ss") + "\t" + text + "\r\n", new UTF8Encoding(false));
-            } catch { }
+            } catch {
+                // The log is a record, not a safeguard: a line that cannot be written
+                // never stops or undoes a change (the state file is what keeps originals)
+            }
         }
 
     }
@@ -229,6 +300,11 @@ namespace OmenMon.Library {
     //   boost <TAB> {scheme GUID} <TAB> value
     //   refresh <TAB> Hz
     //   gpu <TAB> app <TAB> original value (empty = the app had no preference)
+    //
+    // Eco+ saves it before it changes Windows, and changes nothing if the save fails.
+    // A file that exists but cannot be read is never overwritten: it is moved aside to
+    // a .bad copy (originals in it kept for a human), or, if even that fails, Save
+    // refuses until a later Reload can read it.
     public sealed class EcoPlusState {
 
         public const string FileName = "OmenMon-EcoPlus.state";
@@ -243,37 +319,111 @@ namespace OmenMon.Library {
             this.path = path;
         }
 
+        // Why the file could not be loaded (null if it was, or there was none)
+        public string LoadError { get; private set; }
+
+        // True while an unreadable file is still in place: Save does not overwrite it
+        public bool Blocked { get; private set; }
+
+        // Why the last Save failed (null if it worked)
+        public string LastError { get; private set; }
+
+        // The Eco+ log next to the state file
+        public string LogPath {
+            get { return this.path == null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(this.path)), EcoPlusLog.FileName); }
+        }
+
+        private string TempPath { get { return this.path + ".tmp"; } }
+
         public static EcoPlusState Load(string path) {
             EcoPlusState s = new EcoPlusState(path);
-            if(path == null || !File.Exists(path))
+            string source = s.Source();
+            if(source == null)
                 return s;
             try {
-                foreach(string line in File.ReadAllLines(path, Encoding.UTF8)) {
-                    string[] f = line.Split('\t');
-                    if(f.Length == 3 && f[0] == "boost" && Guid.TryParse(f[1], out Guid g) && uint.TryParse(f[2], out uint v))
-                        s.SavedBoostDc[g] = v;
-                    else if(f.Length == 2 && f[0] == "refresh" && int.TryParse(f[1], out int hz) && hz > 0)
-                        s.RefreshBefore = hz;
-                    else if(f.Length == 3 && f[0] == "gpu" && f[1].Length > 0)
-                        s.SavedGpu[f[1]] = f[2].Length > 0 ? f[2] : null;
-                }
-            } catch { }
+                s.Parse(File.ReadAllLines(source, Encoding.UTF8));
+            } catch(Exception e) {
+                s.SetAside(source, e);
+            }
             return s;
+        }
+
+        // Reads the file again while Blocked; true once it is no longer blocked
+        public bool Reload() {
+            if(!this.Blocked)
+                return true;
+            try {
+                string source = Source();
+                if(source != null)
+                    Parse(File.ReadAllLines(source, Encoding.UTF8));
+                this.Blocked = false;
+                this.LoadError = null;
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        // The file to read: the state file, or the temporary file of a save that was cut
+        // short between writing it and putting it in place
+        private string Source() {
+            if(this.path == null)
+                return null;
+            if(File.Exists(this.path))
+                return this.path;
+            return File.Exists(TempPath) ? TempPath : null;
+        }
+
+        private void Parse(string[] lines) {
+            this.SavedBoostDc.Clear();
+            this.SavedGpu.Clear();
+            this.RefreshBefore = null;
+            foreach(string line in lines) {
+                string[] f = line.Split('\t');
+                if(f.Length == 3 && f[0] == "boost" && Guid.TryParse(f[1], out Guid g) && uint.TryParse(f[2], out uint v))
+                    this.SavedBoostDc[g] = v;
+                else if(f.Length == 2 && f[0] == "refresh" && int.TryParse(f[1], out int hz) && hz > 0)
+                    this.RefreshBefore = hz;
+                else if(f.Length == 3 && f[0] == "gpu" && f[1].Length > 0)
+                    this.SavedGpu[f[1]] = f[2].Length > 0 ? f[2] : null;
+            }
+        }
+
+        private void SetAside(string source, Exception e) {
+            this.LoadError = "could not read " + Path.GetFileName(source) + " (" + e.Message + ")";
+            string bad = this.path + ".bad";
+            if(File.Exists(bad))
+                bad = this.path + ".bad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            try {
+                File.Move(source, bad);
+                this.LoadError += ", kept as " + Path.GetFileName(bad) + " with the originals it holds; starting empty";
+            } catch {
+                this.Blocked = true;
+                this.LoadError += " and could not move it aside: Eco+ changes nothing until it can be read";
+            }
         }
 
         public bool IsEmpty {
             get { return this.SavedBoostDc.Count == 0 && this.SavedGpu.Count == 0 && !this.RefreshBefore.HasValue; }
         }
 
-        // Atomic: written to a temporary file first; the file is removed when empty
-        public void Save() {
+        // Atomic: written to a temporary file first, which is never deleted while it may
+        // be the only copy; the file is removed when empty. False if it was not saved.
+        public bool Save() {
             if(this.path == null)
-                return;
+                return true;
+            if(this.Blocked) {
+                this.LastError = "the state file could not be read, so it is not overwritten";
+                return false;
+            }
             try {
                 if(IsEmpty) {
                     if(File.Exists(this.path))
                         File.Delete(this.path);
-                    return;
+                    if(File.Exists(TempPath))
+                        File.Delete(TempPath);
+                    this.LastError = null;
+                    return true;
                 }
                 StringBuilder sb = new StringBuilder();
                 foreach(KeyValuePair<Guid, uint> b in this.SavedBoostDc)
@@ -282,13 +432,23 @@ namespace OmenMon.Library {
                     sb.Append("refresh\t").Append(this.RefreshBefore.Value).Append("\r\n");
                 foreach(KeyValuePair<string, string> g in this.SavedGpu)
                     sb.Append("gpu\t").Append(g.Key).Append('\t').Append(g.Value ?? "").Append("\r\n");
-                string temp = this.path + ".tmp";
-                File.WriteAllText(temp, sb.ToString(), new UTF8Encoding(false));
-                if(File.Exists(this.path))
-                    File.Replace(temp, this.path, null);
-                else
-                    File.Move(temp, this.path);
-            } catch { }
+                File.WriteAllText(TempPath, sb.ToString(), new UTF8Encoding(false));
+                if(File.Exists(this.path)) {
+                    try {
+                        File.Replace(TempPath, this.path, null);
+                    } catch when(!File.Exists(this.path) && File.Exists(TempPath)) {
+                        // ReplaceFile can fail after moving the old file away: the new
+                        // content is in the temporary file, so put that in place
+                        File.Move(TempPath, this.path);
+                    }
+                } else
+                    File.Move(TempPath, this.path);
+                this.LastError = null;
+                return true;
+            } catch(Exception e) {
+                this.LastError = e.Message;
+                return false;
+            }
         }
 
     }

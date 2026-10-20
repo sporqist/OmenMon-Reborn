@@ -273,6 +273,101 @@ namespace OmenMon.Tests {
             Assert.Empty(s.SavedGpu);
         }
 
+        // The state file is written before Windows is changed: no saved original, no change
+        private string LogText { get { string p = Path.Combine(this.dir, EcoPlusLog.FileName); return File.Exists(p) ? File.ReadAllText(p) : ""; } }
+
+        private void BreakSaving() { Directory.CreateDirectory(StatePath + ".tmp"); }
+        private void FixSaving() { Directory.Delete(StatePath + ".tmp"); }
+
+        [Fact]
+        public void FailedSave_LeavesBoostAlone_AndIsLoggedOnce() {
+            var eco = NewEco();
+            BreakSaving();
+            eco.Maintain(true);
+            eco.Maintain(true);
+            Assert.Equal(0, this.plan.Writes);
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.True(eco.State.IsEmpty);
+            Assert.NotNull(eco.LastError);
+            Assert.Single(LogText.Split('\n'), l => l.Contains("could not save"));
+            FixSaving();
+            eco.Maintain(true);
+            Assert.Equal(0u, this.plan.Dc[Balanced]);
+            Assert.Equal(2u, EcoPlusState.Load(StatePath).SavedBoostDc[Balanced]);
+            Assert.Null(eco.LastError);
+        }
+
+        [Fact]
+        public void FailedSave_LeavesTheRefreshRateAlone() {
+            this.plan.Dc[Balanced] = 0;
+            this.options = new EcoPlusOptions { Enabled = true, RefreshRateOnBattery = 60, RefreshHoldSeconds = 0 };
+            var eco = NewEco();
+            BreakSaving();
+            eco.Maintain(true);
+            Assert.Equal(165, this.display.Hz);
+            Assert.Null(eco.State.RefreshBefore);
+        }
+
+        [Fact]
+        public void FailedSave_LeavesGpuPreferencesAlone() {
+            this.gpu.Values["a.exe"] = "GpuPreference=2;";
+            var eco = NewEco();
+            BreakSaving();
+            Assert.Equal(0, eco.ReleaseGpu(new[] { "a.exe", "b.exe" }));
+            Assert.Equal("GpuPreference=2;", this.gpu.Get("a.exe"));
+            Assert.Null(this.gpu.Get("b.exe"));
+            Assert.Empty(eco.State.SavedGpu);
+            Assert.NotNull(eco.LastError);
+        }
+
+        [Fact]
+        public void UnreadableState_IsKeptAsBad_AndLogged() {
+            File.WriteAllText(StatePath, "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
+            EcoPlusState s;
+            // Readable by no one, but it can be renamed
+            using(new FileStream(StatePath, FileMode.Open, FileAccess.Read, FileShare.Delete))
+                s = EcoPlusState.Load(StatePath);
+            Assert.True(s.IsEmpty);
+            Assert.False(s.Blocked);
+            Assert.False(File.Exists(StatePath));
+            Assert.Contains("{381b4222", File.ReadAllText(StatePath + ".bad"));
+            new EcoPlus(this.plan, this.gpu, this.display, s, () => this.options, () => this.now);
+            Assert.Contains(".bad", LogText);
+        }
+
+        [Fact]
+        public void UnreadableState_ThatCannotBeMoved_BlocksChanges_UntilItCanBeRead() {
+            File.WriteAllText(StatePath, "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
+            this.plan.Dc[Balanced] = 0;          // as Eco+ left it before the restart
+            this.plan.Dc[HighPerf] = 1;
+            this.plan.Active = HighPerf;
+            EcoPlus eco;
+            using(new FileStream(StatePath, FileMode.Open, FileAccess.Read, FileShare.None)) {
+                eco = NewEco();
+                Assert.True(eco.State.Blocked);
+                eco.Maintain(true);
+                Assert.Equal(0, this.plan.Writes);
+                Assert.Equal(1u, this.plan.Dc[HighPerf]);
+            }
+            Assert.Contains("changes nothing", LogText);
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(true);                  // readable again: the original is restored
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.False(File.Exists(StatePath));
+        }
+
+        [Fact]
+        public void InterruptedSave_IsRecoveredFromTheTemporaryFile() {
+            File.WriteAllText(StatePath + ".tmp", "boost\t{381b4222-f694-41f0-9685-ff5bb260df2e}\t2\r\n");
+            var eco = NewEco();
+            Assert.Equal(2u, eco.State.SavedBoostDc[Balanced]);
+            this.plan.Dc[Balanced] = 0;
+            this.options = new EcoPlusOptions { Enabled = false };
+            eco.Maintain(false);
+            Assert.Equal(2u, this.plan.Dc[Balanced]);
+            Assert.False(File.Exists(StatePath + ".tmp"));
+        }
+
     }
 
     public class PowerMathTests {

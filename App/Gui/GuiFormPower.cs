@@ -155,6 +155,8 @@ namespace OmenMon.AppGui {
             if(what != null)
                 EcoPlusLog.Append(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, EcoPlusLog.FileName),
                     DateTime.Now, "Power window: " + what);
+            if(what == null && this.Eco?.LastError != null)
+                what = "Not changed: " + this.Eco.LastError;
             if(what == null && this.Eco != null && this.Eco.RefreshPending)
                 what = "On. The refresh rate changes once the power source has been stable for "
                     + Config.EcoPlusRefreshHold + " s.";
@@ -168,7 +170,10 @@ namespace OmenMon.AppGui {
                 return;
             int n = 0;
             try { n = this.Eco?.ReleaseGpu(apps) ?? 0; } catch(Exception ex) { LblGpuNote.Text = "Failed: " + ex.Message; return; }
-            LblGpuNote.Text = n + " app(s) set to power saving. They use the integrated GPU after a restart.";
+            if(this.Eco?.LastError != null)
+                LblGpuNote.Text = n + " app(s) set to power saving; the rest left as they are: " + this.Eco.LastError;
+            else
+                LblGpuNote.Text = n + " app(s) set to power saving. They use the integrated GPU after a restart.";
             this.Listed.Clear();   // re-list with the new preferences
             UpdateRestoreButton();
         }
