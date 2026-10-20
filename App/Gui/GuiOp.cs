@@ -48,6 +48,24 @@ namespace OmenMon.AppGui {
         // OmenMon-Graphics.state next to the executable
         internal readonly GraphicsApps GraphicsApps;
 
+        // Graphics apps: how the GPU preferences compared with the active profile when
+        // OmenMon started (null: no active profile); shown in the Graphics apps window
+        internal readonly GraphicsDrift GraphicsStartup;
+
+        // The check after a start (a reboot, a sign-in): are the GPU preferences still as
+        // the active profile has them? Nothing is applied, the result is logged
+        private static GraphicsDrift CheckGraphics(GraphicsApps graphics) {
+            try {
+                GraphicsDrift drift = GraphicsStartupCheck.Check(Config.GraphicsProfiles, Config.GraphicsProfileActive, graphics.Plan);
+                if(drift != null)
+                    ChangeLog.Append(graphics.State.LogPath, DateTime.Now, "Graphics apps: start: " + drift.Text);
+                return drift;
+            } catch(Exception e) {
+                ChangeLog.Append(graphics.State.LogPath, DateTime.Now, "Graphics apps: start: the check failed: " + e.Message);
+                return null;
+            }
+        }
+
         // Loads both states and moves the GPU preferences an earlier Eco+ kept into the
         // graphics state, before either feature changes or saves anything
         private static GraphicsApps StartGraphics(out EcoPlus eco) {
@@ -109,6 +127,7 @@ namespace OmenMon.AppGui {
 
             // Eco+ and Graphics apps (no hardware: Windows settings and the registry)
             this.GraphicsApps = StartGraphics(out this.EcoPlus);
+            this.GraphicsStartup = CheckGraphics(this.GraphicsApps);
 
             // Initialize the BIOS and the Embedded Controller
             Hw.BiosInit();

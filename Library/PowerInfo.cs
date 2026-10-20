@@ -219,6 +219,14 @@ namespace OmenMon.Library {
             return s;
         }
 
+        // The discrete GPU only (the Graphics apps window): its PnP power state and,
+        // only while it is on, the apps holding it (NVML, as for the Power window)
+        public PowerSnapshot ReadGpuOnly() {
+            PowerSnapshot s = new PowerSnapshot { Time = DateTime.Now };
+            ReadGpu(s);
+            return s;
+        }
+
         private CimSession Cim {
             get {
                 if(this.cim == null)

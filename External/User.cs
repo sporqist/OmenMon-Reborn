@@ -22,6 +22,7 @@ namespace OmenMon.External {
         // Exit Windows flags
         public const int EWX_FORCE       = 0x00000004;
         public const int EWX_FORCEIFHUNG = 0x00000010;
+        public const int EWX_LOGOFF      = 0x00000000;
         public const int EWX_REBOOT      = 0x00000002;
 
         // Handle identifying all windows for message broadcast purposes
@@ -37,8 +38,9 @@ namespace OmenMon.External {
         public const int SC_MONITORPOWER = 0xF170;
 
         // Shutdown reason flags
-        public const uint SHTDN_REASON_FLAG_PLANNED   = 0x80000000;
-        public const uint SHTDN_REASON_MAJOR_HARDWARE = 0x00010000;
+        public const uint SHTDN_REASON_FLAG_PLANNED      = 0x80000000;
+        public const uint SHTDN_REASON_MAJOR_APPLICATION = 0x00040000;
+        public const uint SHTDN_REASON_MAJOR_HARDWARE    = 0x00010000;
         public const uint SHTDN_REASON_MINOR_RECONFIG = 0x00000004;
 
         // Show window flags
@@ -167,7 +169,7 @@ namespace OmenMon.External {
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
-        [DllImport(DllName, CallingConvention = CallingConvention.Winapi)]
+        [DllImport(DllName, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern int ExitWindowsEx(int uFlags, uint dwReason);
 

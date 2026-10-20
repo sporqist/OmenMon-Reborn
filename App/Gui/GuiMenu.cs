@@ -114,6 +114,7 @@ namespace OmenMon.AppGui {
         private const string I_CONTRIBUTE = Gui.M_ACT + "ContributeHwData";
         private const string I_COPY_DIAG = Gui.M_ACT + "CopyDiag";
         private const string I_POWER = Gui.M_ACT + "Power";
+        private const string I_GRAPHICS = Gui.M_ACT + "Graphics";
 
         // Menu tag identifiers
         internal const string MENU_TAG_PERSIST = "Persist";
@@ -149,6 +150,16 @@ namespace OmenMon.AppGui {
                 GuiFormPower.ShowWindow(Context.Op?.EcoPlus, Context.Op?.GraphicsApps);
             } catch(Exception ex) {
                 MessageBox.Show("Could not open Power & Efficiency: " + ex.Message,
+                    Config.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        // Opens the Graphics apps window (per-app GPU preference profiles)
+        private void EventActionGraphics(object sender, EventArgs e) {
+            try {
+                GuiFormGraphics.ShowWindow(Context.Op?.GraphicsApps, Context.Op?.GraphicsStartup);
+            } catch(Exception ex) {
+                MessageBox.Show("Could not open Graphics apps: " + ex.Message,
                     Config.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
@@ -965,6 +976,7 @@ namespace OmenMon.AppGui {
                 MenuSettings,
                 new ToolStripSeparator(),
                 new ToolStripMenuItem("Power && Efficiency...", null, EventActionPower, I_POWER),
+                new ToolStripMenuItem("Graphics apps...", null, EventActionGraphics, I_GRAPHICS),
                 new ToolStripMenuItem("Auto-Calibrate && Diagnose...", null, EventActionAutoCalibrate, I_CONTRIBUTE),
                 new ToolStripMenuItem("Copy Diagnostic Info", null, EventActionCopyDiag, I_COPY_DIAG),
                 new ToolStripSeparator(),

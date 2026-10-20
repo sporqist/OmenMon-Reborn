@@ -14,8 +14,9 @@ using OmenMon.Library;
 namespace OmenMon.AppGui {
 
     // Power & Efficiency window: what draws power right now and why, plus Eco+. The apps
-    // keeping the discrete GPU awake can be added to the active graphics profile as power
-    // saving (Graphics apps keeps their originals; Windows default lives there).
+    // keeping the discrete GPU awake can be added to a graphics profile as power saving
+    // (the active one unless the user picks another; Graphics apps keeps their originals,
+    // and Windows default lives there).
     // Readings run on a worker thread every 3 s (WMI and NVML calls can take a moment);
     // the window only renders them. NVML is read far less often (NvmlSchedule), so the
     // window does not keep the discrete GPU awake. Nothing here reads the EC.
@@ -87,7 +88,7 @@ namespace OmenMon.AppGui {
 
             GroupBox grpGpu = new GroupBox { Text = "Apps keeping the discrete GPU awake", Location = new Point(12, 456), Size = new Size(576, 142) };
             LstApps = new CheckedListBox { Location = new Point(12, 22), Size = new Size(552, 58), CheckOnClick = true, IntegralHeight = false };
-            BtnRelease = new Button { Text = "Add checked apps to the profile as power saving", Location = new Point(12, 86), Size = new Size(300, 26) };
+            BtnRelease = new Button { Text = "Add to a profile as power saving…",Location = new Point(12, 86), Size = new Size(300, 26) };
             LblGpuNote = new Label {
                 Text = "Apps pick the change up when they restart. Originals are kept (Windows default puts them back).",
                 Location = new Point(12, 116), Size = new Size(552, 20), ForeColor = SystemColors.GrayText };
@@ -165,16 +166,33 @@ namespace OmenMon.AppGui {
             LblEco.Text = what ?? (ChkEco.Checked ? "On." : "Off.");
         }
 
-        // Adds the checked apps to the active graphics profile as power saving ("Power
-        // saving", made if none is active) and applies it; restarts nothing
+        // Adds the checked apps to a graphics profile as power saving and applies it;
+        // restarts nothing. With more than one profile the user picks it (the active one
+        // first), else it is the active one ("Power saving", made if none is active).
+        // Nothing is added while the configuration file did not load.
         private void EventRelease() {
             List<string> apps = LstApps.CheckedItems.Cast<AppItem>().Select(i => i.Holder.AppKey).ToList();
             if(apps.Count == 0 || this.GraphicsApps == null)
                 return;
+            if(Config.LoadFailed) {
+                LblGpuNote.Text = "Not added: OmenMon.xml did not load, so no profile is changed.";
+                return;
+            }
+            string active = Config.GraphicsProfileActive;
+            string target = active;
+            List<string> choices = GraphicsPowerTarget.Choices(Config.GraphicsProfiles, active, out int selected);
+            if(choices != null) {
+                string choice = GuiGraphicsDialogs.PickProfile(this, "Add to a profile as power saving",
+                    "Add the " + apps.Count + " checked app(s) as power saving to:", choices, selected,
+                    c => GraphicsPowerTarget.Note(c, active));
+                if(choice == null)
+                    return;
+                target = GraphicsPowerTarget.AddTarget(choice);
+            }
             GraphicsResult result;
             GraphicsProfile profile;
             try {
-                profile = GraphicsProfile.AddApps(Config.GraphicsProfiles, Config.GraphicsProfileActive,
+                profile = GraphicsProfile.AddApps(Config.GraphicsProfiles, target,
                     apps, GpuChoice.PowerSaving, this.GraphicsApps.State.Managed);
                 result = this.GraphicsApps.Apply(profile, "Power window");
             } catch(Exception ex) {

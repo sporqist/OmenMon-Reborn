@@ -177,6 +177,18 @@ Right-click tray → **Graphics** to switch between:
 
 ---
 
+## Graphics Apps (per-app GPU)
+
+Right-click tray → **Graphics apps...** for profiles of the per-app GPU preference Windows keeps in Settings → Display → Graphics (power saving, high performance or let Windows decide):
+
+- **Profiles**: New, Duplicate, Rename, Delete. **Windows default** is built in: every app OmenMon manages gets its original preference back. Changes are saved to `OmenMon.xml` at once (not while the file failed to load).
+- **Apps**: Add exe..., Add running app..., Remove, and a dropdown per app. "Registry now" shows what is set at the moment.
+- **Apply** shows the planned changes first. An app changed in Windows Settings meanwhile is left as it is. The applied profile becomes the active one.
+- Running apps take a new GPU only when they start again. After applying, a dialog lists them: checked apps are asked to close (15 s each), then started again, never as administrator; an app still running is ended only if you say so. Unchecked apps switch at their next start. **Sign out...** and **Restart Windows...** ask once more before anything happens.
+- After a restart of OmenMon the registry is compared with the active profile (logged to `OmenMon-Graphics.log`, shown in the window with **Apply again...**); nothing is applied by itself.
+
+---
+
 ## Auto-Config on Startup
 
 When `AutoConfig = true` in `OmenMon.xml`:
