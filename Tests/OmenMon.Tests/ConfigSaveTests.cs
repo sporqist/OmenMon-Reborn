@@ -459,6 +459,39 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
+        public void Save_AfterAFailedLoad_EntriesOfTheFixedFile_AreNotReplaced() {
+            File.WriteAllText(File_, "<OmenMon><Config><AutoConfig>true</Auto");
+            Config.Load();
+            Assert.True(Config.LoadFailed);
+
+            // The user fixes the file: it holds the hand-measured board and a Quiet program
+            File.WriteAllText(File_, ScalarFixture.Replace("<Config>", "<Config><FanPrograms>"
+                + @"<Program Name=""Quiet""><!-- tuned by hand --><FanMode>Default</FanMode><GpuPower>Maximum</GpuPower>"
+                + @"<Level Temperature=""00""><Cpu>22</Cpu><Gpu>25</Gpu></Level></Program></FanPrograms>"
+                + "<Models>" + BrokenModel.Replace("</Model>", "<SwitchReg>244</SwitchReg></Model>") + "</Models>"));
+            XmlDocument before = new XmlDocument();
+            before.Load(File_);
+            string measured = Models(before, "8BAC")[0]!.OuterXml, quiet = Program(before, "Quiet")!.OuterXml;
+
+            // Meanwhile the scan is accepted (SaveModel()) and Quiet is made again in the application
+            Config.Models["8BAC"] = new PlatformPreset { ProductId = "8BAC", DisplayName = "Scanned",
+                FanLevelReg0 = 17, FanLevelReg1 = 17, ModeReg = 89, SwitchReg = 244 };
+            Config.FanProgram["Quiet"] = new FanProgramData("Quiet", BiosData.FanMode.Default, BiosData.GpuPowerLevel.Max,
+                new SortedDictionary<byte, byte[]> { [0] = new byte[] { 30, 33 } });
+            XmlDocument xml = SaveAndRead();
+
+            // The file's entries stay as they were, the application's go after them
+            XmlNodeList models = Models(xml, "8BAC");
+            Assert.Equal(2, models.Count);
+            Assert.Equal(measured, models[0]!.OuterXml);
+            Assert.Equal("Scanned", ((XmlElement) models[1]!).GetAttribute("DisplayName"));
+            XmlNodeList programs = xml.SelectNodes("OmenMon/Config/FanPrograms/Program[@Name='Quiet']")!;
+            Assert.Equal(2, programs.Count);
+            Assert.Equal(quiet, programs[0]!.OuterXml);
+            Assert.Equal("30", programs[1]!.SelectSingleNode("Level[@Temperature='00']/Cpu")!.InnerText);
+        }
+
+        [Fact]
         public void Save_BrokenDraftAfterTheLoadedEntry_IsKept() {
             // A revised copy of Alpha pasted below the working one, with a typo
             const string draft = @"<Program Name=""Alpha""><FanMode>Default</FanMode><GpuPower>Medum</GpuPower>"
