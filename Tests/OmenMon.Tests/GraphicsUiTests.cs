@@ -544,8 +544,15 @@ namespace OmenMon.Tests {
             Assert.Equal("Battery", GraphicsPowerTarget.AddTarget("Battery"));
             Assert.Equal("", GraphicsPowerTarget.AddTarget(GraphicsPowerTarget.NewPowerSaving));
             Assert.Contains("only the apps added change", GraphicsPowerTarget.Note("Show", "Show"));
-            Assert.Contains("all of it is applied", GraphicsPowerTarget.Note("Battery", "Show"));
-            Assert.Contains("apps of Show not in it get their originals back", GraphicsPowerTarget.Note("Battery", "Show"));
+            Assert.Contains("only added to it", GraphicsPowerTarget.Note("Battery", "Show"));
+            Assert.Contains("all of it is applied", GraphicsPowerTarget.Note("Battery", ""));
+
+            // Only the active profile, none active or "Power saving (new)" is applied
+            // here; another profile only gets the apps (no apply without the preview)
+            Assert.False(GraphicsPowerTarget.AppliesNow("Battery", "Show"));
+            Assert.True(GraphicsPowerTarget.AppliesNow("show", "Show"));
+            Assert.True(GraphicsPowerTarget.AppliesNow("Battery", ""));
+            Assert.True(GraphicsPowerTarget.AppliesNow(GraphicsPowerTarget.NewPowerSaving, "Show"));
 
             // None active: "Power saving", made from what OmenMon manages
             GraphicsPowerTarget.Choices(c.Profiles, "", out selected);

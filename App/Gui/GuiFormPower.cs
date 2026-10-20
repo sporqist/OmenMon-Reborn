@@ -168,7 +168,8 @@ namespace OmenMon.AppGui {
 
         // Adds the checked apps to a graphics profile as power saving and applies it;
         // restarts nothing. With more than one profile the user picks it (the active one
-        // first), else it is the active one ("Power saving", made if none is active).
+        // first), else it is the active one ("Power saving", made if none is active). A
+        // profile that is not the active one only gets the apps (see AppliesNow).
         // Nothing is added while the configuration file did not load.
         private void EventRelease() {
             List<string> apps = LstApps.CheckedItems.Cast<AppItem>().Select(i => i.Holder.AppKey).ToList();
@@ -180,6 +181,7 @@ namespace OmenMon.AppGui {
             }
             string active = Config.GraphicsProfileActive;
             string target = active;
+            bool apply = true;
             List<string> choices = GraphicsPowerTarget.Choices(Config.GraphicsProfiles, active, out int selected);
             if(choices != null) {
                 string choice = GuiGraphicsDialogs.PickProfile(this, "Add to a profile as power saving",
@@ -188,12 +190,20 @@ namespace OmenMon.AppGui {
                 if(choice == null)
                     return;
                 target = GraphicsPowerTarget.AddTarget(choice);
+                apply = GraphicsPowerTarget.AppliesNow(choice, active);
             }
             GraphicsResult result;
             GraphicsProfile profile;
             try {
                 profile = GraphicsProfile.AddApps(Config.GraphicsProfiles, target,
                     apps, GpuChoice.PowerSaving, this.GraphicsApps.State.Managed);
+                if(!apply) {
+                    // Not the active profile: only added, applied from Graphics apps
+                    try { Config.Save(); } catch { }
+                    LblGpuNote.Text = apps.Count + " app(s) added to " + profile.Name + " as power saving. They change when "
+                        + profile.Name + " is applied in Graphics apps.";
+                    return;
+                }
                 result = this.GraphicsApps.Apply(profile, "Power window");
             } catch(Exception ex) {
                 LblGpuNote.Text = "Failed: " + ex.Message;

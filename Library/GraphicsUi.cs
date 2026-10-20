@@ -699,6 +699,16 @@ namespace OmenMon.Library {
             return choice == NewPowerSaving ? "" : choice;
         }
 
+        // Whether adding to this choice applies it now. A profile that is not the active
+        // one only gets the apps: applying it here, without the preview Graphics apps
+        // shows, would change every app in it and give the active profile's other apps
+        // their originals back. With none active, or "Power saving (new)" (made from the
+        // apps OmenMon manages now), only the apps added change, so it is applied.
+        public static bool AppliesNow(string choice, string active) {
+            return choice == NewPowerSaving || string.IsNullOrEmpty(active)
+                || string.Equals(choice, active, StringComparison.OrdinalIgnoreCase);
+        }
+
         // A note under the choice when it is not the active profile
         public static string Note(string choice, string active) {
             string name = choice == NewPowerSaving ? GraphicsProfile.PowerSavingName : choice;
@@ -706,8 +716,9 @@ namespace OmenMon.Library {
                 return "The active profile: only the apps added change.";
             if(choice == NewPowerSaving)
                 return "Made from the apps OmenMon manages now, so only the apps added change.";
-            return name + " is not the active profile: all of it is applied"
-                + (string.IsNullOrEmpty(active) ? "." : ", and apps of " + active + " not in it get their originals back.");
+            if(string.IsNullOrEmpty(active))
+                return name + " is not active: all of it is applied.";
+            return name + " is not the active profile: the apps are only added to it, and take effect when it is applied in Graphics apps.";
         }
 
     }
