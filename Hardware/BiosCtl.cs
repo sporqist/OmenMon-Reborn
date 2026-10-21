@@ -5,6 +5,7 @@
 
 using System;
 using System.Text;
+using OmenMon.Core;
 using OmenMon.Library;
 
 namespace OmenMon.Hardware.Bios {
@@ -63,7 +64,13 @@ namespace OmenMon.Hardware.Bios {
         public byte GetFanType();
 
         public byte[] GetFanLevel();
-        public void SetFanLevel(byte[] data);
+
+        // Fan levels take a SafeLevel: a level the fan-safety guard decided on, which only
+        // the core can construct. SetFanLevelWithoutGuard is the legacy path for a fan
+        // array without a guard (and the tests of the simulated BIOS itself); nothing
+        // else may use it (SafeLevelBoundaryTests).
+        public void SetFanLevel(SafeLevel level);
+        public void SetFanLevelWithoutGuard(byte[] data);
 
         public void SetFanMode(BiosData.FanMode value);
 
@@ -358,8 +365,20 @@ namespace OmenMon.Hardware.Bios {
             return new byte[2] {outData[0], outData[1]};
         }
 
-        // Updates the current speed level for each fan
-        public void SetFanLevel(byte[] data) {
+        // Updates the current speed level for each fan, to a level the fan-safety rules
+        // produced (a default SafeLevel throws before anything is sent)
+        public void SetFanLevel(SafeLevel level) {
+            SendFanLevel(level.ToArray());
+        }
+
+        // Updates the current speed level for each fan without the fan-safety rules
+        // (legacy: a fan array without a guard; see IBiosCtl)
+        public void SetFanLevelWithoutGuard(byte[] data) {
+            SendFanLevel(data);
+        }
+
+        // Sends a fan level
+        private void SendFanLevel(byte[] data) {
             // Some boards (observed on 8BAC, BIOS F.30) acknowledge 0x2E but ignore it unless a
             // fan count query with a 1-byte input comes right before it; the Linux hp-wmi driver
             // sends the same query first. The level then holds for about 120 s, so it has to be

@@ -25,7 +25,7 @@ namespace OmenMon.Tests {
         [Fact]
         public void BiosCtl_EncodesFanLevelAsType2E_AfterFanCountQuery() {
             var rig = new TestRig();
-            rig.BiosCtl.SetFanLevel(new byte[] { 30, 33 });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 30, 33 });
             Assert.Equal(2, rig.Bios.Calls.Count);
             Assert.Equal(0x10u, rig.Bios.Calls[0].Type);
             Assert.Equal(0x2Eu, rig.Bios.Calls[1].Type);
@@ -44,7 +44,7 @@ namespace OmenMon.Tests {
         [Fact]
         public void SetFanLevel_TakesEffect_BecauseItQueriesTheFanCountFirst() {
             var rig = new TestRig();
-            rig.BiosCtl.SetFanLevel(new byte[] { 40, 40 });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 40, 40 });
             Assert.Equal(new byte[] { 40, 40 }, rig.Bios.ActiveLevels);
         }
 
@@ -53,7 +53,7 @@ namespace OmenMon.Tests {
             var rig = new TestRig();
             rig.BiosCtl.GetFanCount();
             rig.Bios.Advance(TimeSpan.FromSeconds(30));
-            rig.BiosCtl.SetFanLevel(new byte[] { 40, 41 });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 40, 41 });
             Assert.Equal(new byte[] { 40, 41 }, rig.BiosCtl.GetFanLevel());
         }
 
@@ -61,7 +61,7 @@ namespace OmenMon.Tests {
         public void FanLevel_ExpiresAbout124sAfterLastSet() {
             var rig = new TestRig();
             rig.BiosCtl.GetFanCount();
-            rig.BiosCtl.SetFanLevel(new byte[] { 40, 41 });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 40, 41 });
             rig.Bios.Advance(TimeSpan.FromSeconds(123));
             Assert.Equal(new byte[] { 40, 41 }, rig.Bios.MeasuredLevels);
             rig.Bios.Advance(TimeSpan.FromSeconds(1));
@@ -72,7 +72,7 @@ namespace OmenMon.Tests {
         public void FanCountQuery_KeepsActiveLevelAlive() {
             var rig = new TestRig();
             rig.BiosCtl.GetFanCount();
-            rig.BiosCtl.SetFanLevel(new byte[] { 40, 41 });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 40, 41 });
             for(int i = 0; i < 10; i++) {
                 rig.Bios.Advance(TimeSpan.FromSeconds(30));
                 rig.BiosCtl.GetFanCount();
@@ -84,9 +84,9 @@ namespace OmenMon.Tests {
         public void ZeroZero_SwitchesFansOff_AndFfFfKeepsIt() {
             var rig = new TestRig();
             rig.BiosCtl.GetFanCount();
-            rig.BiosCtl.SetFanLevel(new byte[] { 0, 0 });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 0, 0 });
             Assert.True(rig.Bios.FansOff);
-            rig.BiosCtl.SetFanLevel(new byte[] { 0xFF, 0xFF });
+            rig.BiosCtl.SetFanLevelWithoutGuard(new byte[] { 0xFF, 0xFF });
             Assert.True(rig.Bios.FansOff);
         }
 

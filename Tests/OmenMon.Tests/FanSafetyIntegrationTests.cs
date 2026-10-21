@@ -358,7 +358,7 @@ namespace OmenMon.Tests {
                 .ToList();
             Assert.Empty(offenders);
             Assert.Matches(@"\.SetFanLevel\b", File.ReadAllText(Path.Combine(root, "Hardware", "FanArray.cs")));
-            Assert.Contains("CliFanSafetyGuard().Filter",
+            Assert.Contains("CliFanSafetyGuard().Allow",
                 File.ReadAllText(Path.Combine(root, "App", "Cli", "CliOpBios.cs")));
         }
 

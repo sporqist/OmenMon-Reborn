@@ -21,7 +21,9 @@ namespace OmenMon.Tests.Fakes {
     // FakeEcRegisters. Sensor layout as on the real board: CPUT at EC 0xB2, GPTM at
     // EC 0xB4, plus the BIOS 0x23 sensor. With ecDriver, CPUT and GPTM read through the
     // production EC path (HwEcRegisters, Hw.TryEcGetByte, EmbeddedControllerAbstract) over
-    // FakeEmbeddedController, which is then Hw.Ec until the rig is disposed.
+    // FakeEmbeddedController, which is then Hw.Ec until the rig is disposed. With
+    // fanArrayBios, the fan array calls the BIOS through what it returns for BiosCtl
+    // (a recorder in SafeLevelBoundaryTests); everything else uses BiosCtl directly.
     public sealed class TestRig : IDisposable {
 
         public Fake8BacBios Bios { get; } = new Fake8BacBios();
@@ -40,7 +42,7 @@ namespace OmenMon.Tests.Fakes {
         private readonly IEmbeddedController? savedEc;
         private readonly int savedEcWaitSpinCount;
 
-        public TestRig(bool ecDriver = false) {
+        public TestRig(bool ecDriver = false, Func<IBiosCtl, IBiosCtl>? fanArrayBios = null) {
 
             Hw.Isolated = true;
             Config.LocaleInit();
@@ -88,7 +90,7 @@ namespace OmenMon.Tests.Fakes {
                 new EcComponent(p.ManualReg, RW, B, int.MaxValue, this.Ec),
                 new EcComponent(p.ModeReg, RW, B, int.MaxValue, this.Ec),
                 new EcComponent(p.SwitchReg, RW, B, int.MaxValue, this.Ec),
-                p.ManualValueOn, p.ManualValueOff, this.BiosCtl);
+                p.ManualValueOn, p.ManualValueOff, fanArrayBios != null ? fanArrayBios(this.BiosCtl) : this.BiosCtl);
 
             EcComponent cput = new EcTemperatureComponent(FakeEcRegisters.CpuTempRegister, Config.MaxBelievableTemperature, sensors);
             cput.SetName("CPUT");

@@ -99,7 +99,7 @@ namespace OmenMon.AppCli {
         }
 
         // Sets the BIOS fan speed level for each fan based on the values parsed from the command line
-        private static void BiosSetFanLevel<TFanType>(string message, string param, Action<byte[]> biosMethod) {
+        private static void BiosSetFanLevel<TFanType>(string message, string param, Action<SafeLevel> biosMethod) {
             try {
                 // Split the parameter into per-fan values
                 string[] level = param.Split(',');
@@ -114,7 +114,8 @@ namespace OmenMon.AppCli {
                 // so the CPU temperature is the BIOS one (WMI 0x23) and the GPU one a
                 // single EC read, if the EC opens.
                 byte[] requested = levelValue;
-                levelValue = CliFanSafetyGuard().Filter(requested);
+                SafeLevel allowed = CliFanSafetyGuard().Allow(requested);
+                levelValue = allowed.ToArray();
                 if(levelValue[0] != requested[0] || levelValue[1] != requested[1])
                     Cli.PrintError(String.Format(Config.Locale.Get("ErrFanLevelFloor"),
                         requested[0], requested[1], levelValue[0], levelValue[1]));
@@ -122,7 +123,7 @@ namespace OmenMon.AppCli {
                 // Output the updated fan levels and send them to the BIOS
                 Cli.PrintBiosResult(true, String.Format(message, 1), levelValue[0], Enum.GetName(typeof(TFanType), 1));
                 Cli.PrintBiosResult(true, String.Format(message, 2), levelValue[1], Enum.GetName(typeof(TFanType), 2));
-                Hw.BiosSet(biosMethod, levelValue);
+                Hw.BiosSet(biosMethod, allowed);
             } catch {
                 App.Error("ErrNeedValueFanLevel|DataSyntaxFanLevel");
             }

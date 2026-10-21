@@ -187,7 +187,7 @@ namespace OmenMon.Hardware.Platform {
 
             // Without a guard (legacy) the level is written as asked
             if(this.Guard == null) {
-                WriteLevels(levels);
+                WriteLevelsWithoutGuard(levels);
                 return;
             }
 
@@ -202,7 +202,7 @@ namespace OmenMon.Hardware.Platform {
         public void Release() {
 
             if(this.Guard == null) {
-                WriteLevels(new byte[] { FanSafetyGuard.NoChange, FanSafetyGuard.NoChange });
+                WriteLevelsWithoutGuard(new byte[] { FanSafetyGuard.NoChange, FanSafetyGuard.NoChange });
                 return;
             }
 
@@ -329,11 +329,16 @@ namespace OmenMon.Hardware.Platform {
 
         // Writes a level the fan-safety guard decided on (every write while there is a guard)
         private void WriteLevels(SafeLevel level) {
-            WriteLevels(level.ToArray());
+            WriteLevels(level.ToArray(), () => Hw.BiosSet(this.Bios.SetFanLevel, level));
         }
 
-        // Writes fan levels without any checks (directly only without a guard, legacy)
-        private void WriteLevels(byte[] levels) {
+        // Writes fan levels without any checks: only for a fan array without a guard (legacy)
+        private void WriteLevelsWithoutGuard(byte[] levels) {
+            WriteLevels(levels, () => Hw.BiosSet(this.Bios.SetFanLevelWithoutGuard, levels));
+        }
+
+        // Writes fan levels, through the EC or with the given BIOS call
+        private void WriteLevels(byte[] levels, Action biosWrite) {
 
             // Set manual fan mode, if needed
             if(Config.FanLevelNeedManual)
@@ -351,7 +356,7 @@ namespace OmenMon.Hardware.Platform {
                 try {
 
                     // Make a WMI BIOS call to set the level of both fans
-                    Hw.BiosSet(this.Bios.SetFanLevel, levels);
+                    biosWrite();
 
                 } catch {
 
@@ -409,6 +414,7 @@ namespace OmenMon.Hardware.Platform {
         // through the fan-safety guard: while the system is not known to be cool (or once
         // the Fan Off time limit is up) the fans get the floor level instead.
         public void SetOff(bool flag) {
+            SafeLevel allowedOff = default(SafeLevel);
             if(flag && this.Guard != null) {
                 byte[] off = new byte[] { 0, 0 };
                 SafeLevel actual = this.Guard.Allow(off);
@@ -420,12 +426,17 @@ namespace OmenMon.Hardware.Platform {
                     return;
                 }
                 this.Guard.RecordWrite(off, actual.ToArray());
+                allowedOff = actual;
             }
             if(flag && !Config.FanLevelUseEc) {
                 try {
 
-                    // Use a BIOS call consistent with SetLevels when in BIOS fan level mode
-                    Hw.BiosSet(this.Bios.SetFanLevel, new byte[] { 0, 0 });
+                    // Use a BIOS call consistent with SetLevels when in BIOS fan level mode:
+                    // the 0/0 the guard allowed (known cool), or without a guard (legacy) 0/0
+                    if(allowedOff.IsValid)
+                        Hw.BiosSet(this.Bios.SetFanLevel, allowedOff);
+                    else
+                        Hw.BiosSet(this.Bios.SetFanLevelWithoutGuard, new byte[] { 0, 0 });
 
                 } catch {
 
