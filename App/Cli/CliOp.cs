@@ -530,6 +530,25 @@ namespace OmenMon.AppCli {
                     i--;
                     break;
 
+                // GPU log: per app dGPU engine time and VRAM over time, to a CSV file
+                case "-gpulog":
+                    Cli.PrintContext(Config.Locale.Get(Config.L_CLI + "GpuLog"), "-GpuLog");
+
+                    // The optional arguments, up to the next context
+                    List<string> gpuLogArgs = new List<string>();
+                    while(i + 1 < args.Length && !args[i + 1].StartsWith("-"))
+                        gpuLogArgs.Add(args[++i]);
+
+                    if(GpuLogMath.TryParseArgs(gpuLogArgs, out int gpuLogSeconds, out string gpuLogFile))
+                        GpuLogRun(gpuLogSeconds, gpuLogFile);
+
+                    // Encountered an unrecognized argument
+                    else {
+                        App.Error("ErrArgUnknown");
+                        goto showUsage; // Interrupt the context loop
+                    }
+                    break;
+
                     // Run a full hardware probe and dump the results as Markdown
                 case "-probe":
                     ProbeRun();

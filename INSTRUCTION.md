@@ -233,6 +233,19 @@ OmenMon.exe [mode] [options]
 | `-Graphics Apply <Profile\|Default>` | Set a profile's per-app GPU preferences, or `Default` to give every managed app its original back. Prints the apps that take the change when they start again; restarts nothing. Exit OmenMon first |
 | `-Graphics Restore` | Same as `-Graphics Apply Default`; use before uninstalling |
 | `-Graphics Adopt <Profile> [<File.reg>]` | Make a profile of the GPU preferences set now, with the originals from a `.reg` export of `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` (without one: their values now). Changes nothing in the registry |
+| `-GpuLog [<seconds>] [<file.csv>]` | Measure which apps use the discrete GPU while another runs (e.g. TouchDesigner). See [GPU Log](#gpu-log) |
+
+---
+
+## GPU Log
+
+`OmenMon.exe -GpuLog [<seconds>] [<file.csv>]` measures which apps use the discrete GPU, for example while TouchDesigner runs a show. Windows has no per-app GPU budget; this only measures, so you can decide what to do about an app afterwards. Defaults: 600 seconds, `OmenMon-GpuLog-<yyyyMMdd-HHmmss>.csv` in the current directory. Ctrl+C ends it early and still prints the summary.
+
+- Every 2 seconds, per process: the discrete GPU's engine utilisation (3D, Compute, Copy, VideoDecode, VideoEncode, other; summed over the process' engines of a type) and its dedicated VRAM, from the Windows performance counters "GPU Engine" and "GPU Process Memory" (the source of Task Manager's GPU columns), plus the GPU's PnP power state.
+- The discrete GPU is found by its LUID: the DXGI adapter list (vendor NVIDIA) gives it, and only counter instances of that LUID are logged. If no such adapter is found, every GPU is logged under its own LUID (column `gpu`) instead of guessing.
+- Nothing talks to the GPU driver (no NVML), so logging does not wake a sleeping GPU. It needs no elevation, writes only the CSV and runs while the OmenMon window runs. Processes of other users or elevated ones may only show a name.
+- CSV columns: time, pid, process, engine, utilization_percent, dedicated_mb (of the whole process, repeated on each of its rows), dgpu_power_state, gpu, path. Only processes with GPU time or memory get a row.
+- The summary lists per app (processes of one name together) the average over the run and the peak share of each engine, the peak VRAM and the seconds with an engine at or above 1 %. Apps other than TouchDesigner that used the GPU are marked with `*` and named at the end.
 
 ---
 
