@@ -3,6 +3,7 @@
      //  https://omenmon.github.io/
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
+using OmenMon.Core;
 using OmenMon.Hardware.Platform;
 using OmenMon.Library;
 using OmenMon.Tests.Fakes;

@@ -35,6 +35,7 @@ if (-not $SkipBuild) {
     } finally { Pop-Location }
 }
 if (-not (Test-Path "$root\Bin\OmenMon.exe")) { throw 'Bin\OmenMon.exe is missing: build first.' }
+if (-not (Test-Path "$root\Bin\OmenMon.Core.dll")) { throw 'Bin\OmenMon.Core.dll is missing: build first.' }
 
 & $iscc "$PSScriptRoot\OmenMon.iss"
 if ($LASTEXITCODE -ne 0) { throw 'ISCC failed.' }

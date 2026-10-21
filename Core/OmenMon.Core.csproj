@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+
+  //\\   OmenMon: Hardware Monitoring & Control Utility
+ //  \\  Copyright © 2023-2024 Piotr Szczepański * License: GPL3
+     //  https://omenmon.github.io/
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
+
+  The pure core: the fan-safety decisions (floor, warm curve, panic, hand-back level),
+  sensor freshness and fan-program curve evaluation. Readings, time and settings come in
+  as values; nothing here touches the hardware, WMI, the registry, files, the clock or
+  the user interface. Referenced by the application and the tests (and later the service).
+
+  net48 for the installed application, net10.0 for the tests and what comes after. The
+  plain net10.0 target (not net10.0-windows) has no Windows Forms or WMI to reach for, and
+  CorePurityTests checks the built assembly for the rest (Microsoft.Win32, P/Invoke).
+
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net48;net10.0</TargetFrameworks>
+    <AssemblyName>OmenMon.Core</AssemblyName>
+    <RootNamespace>OmenMon.Core</RootNamespace>
+    <Deterministic>true</Deterministic>
+    <LangVersion>latest</LangVersion>
+    <WarningLevel>4</WarningLevel>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.5.0.0</AssemblyVersion>
+    <FileVersion>$(AssemblyVersion)</FileVersion>
+    <Company>OmenMon</Company>
+    <Product>OmenMon</Product>
+    <Description>OmenMon core: fan-safety decisions without I/O</Description>
+    <Copyright>© 2023-2024 Piotr Szczepański, © 2026 Marius Alwan Meyer</Copyright>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <!-- Reference assemblies so net48 builds without the targeting pack installed -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

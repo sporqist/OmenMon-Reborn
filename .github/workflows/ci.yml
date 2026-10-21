@@ -72,5 +72,6 @@ jobs:
           name: OmenMon-CI-Binaries
           path: |
             Bin/OmenMon.exe
+            Bin/OmenMon.Core.dll
             Bin/OmenMon.xml
           if-no-files-found: error

@@ -88,6 +88,7 @@ jobs:
         shell: powershell
         run: |
           if (-not (Test-Path "Bin\OmenMon.exe")) { throw "Bin\OmenMon.exe missing!" }
+          if (-not (Test-Path "Bin\OmenMon.Core.dll")) { throw "Bin\OmenMon.Core.dll missing!" }
           if (-not (Test-Path "Bin\OmenMon.xml")) { throw "Bin\OmenMon.xml missing!" }
 
       - name: "Retrieve & Decode Certificate (Optional)"
@@ -105,7 +106,7 @@ jobs:
         if: ${{ env.CODE_SIGN_CERT != '' }}
         run: |
           $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\signtool.exe' | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
-          & $signtool.FullName sign /d OmenMon /du https://omenmon.github.io/ /f OmenMon-GitHub.pfx /fd sha256 /td sha256 /tr http://timestamp.digicert.com/ /v Bin\OmenMon.exe
+          & $signtool.FullName sign /d OmenMon /du https://omenmon.github.io/ /f OmenMon-GitHub.pfx /fd sha256 /td sha256 /tr http://timestamp.digicert.com/ /v Bin\OmenMon.exe Bin\OmenMon.Core.dll
 
       - name: "Upload Stage 2 Build Artifact"
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -113,6 +114,7 @@ jobs:
           name: release-binaries
           path: |
             Bin/OmenMon.exe
+            Bin/OmenMon.Core.dll
             Bin/OmenMon.xml
           if-no-files-found: error
 
@@ -171,6 +173,9 @@ jobs:
           if (Test-Path "Bin\OmenMon.exe") {
             Copy-Item "Bin\OmenMon.exe" -Destination "OmenMon.exe" -Force
           }
+          if (Test-Path "Bin\OmenMon.Core.dll") {
+            Copy-Item "Bin\OmenMon.Core.dll" -Destination "OmenMon.Core.dll" -Force
+          }
           if (Test-Path "Bin\OmenMon.xml") {
             Copy-Item "Bin\OmenMon.xml" -Destination "OmenMon.xml" -Force
           }
@@ -181,6 +186,7 @@ jobs:
             "INSTRUCTION.md",
             "LICENSE.md",
             "MODIFICATIONS.md",
+            "OmenMon.Core.dll",
             "OmenMon.exe",
             "OmenMon.xml",
             "README.md",

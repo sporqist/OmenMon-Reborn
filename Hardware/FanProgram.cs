@@ -5,6 +5,7 @@
 
 using System;
 using System.Collections.Generic;
+using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Library;
 

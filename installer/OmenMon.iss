@@ -85,6 +85,8 @@ Name: "autostart"; Description: "{cm:TaskAutostart}"; Flags: unchecked
 
 [Files]
 Source: "{#Source}\OmenMon.exe"; DestDir: "{app}"; Flags: ignoreversion
+; The pure core (fan-safety decisions) the application is built on: OmenMon.exe does not start without it
+Source: "{#Source}\OmenMon.Core.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\OmenMon.exe.config"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; The default settings only when there are none yet: never overwritten, never removed by the uninstaller
 Source: "{#RepoRoot}\OmenMon.xml"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall

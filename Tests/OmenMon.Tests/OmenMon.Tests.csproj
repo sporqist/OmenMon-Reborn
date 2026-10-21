@@ -27,9 +27,11 @@
     <None Include="Vectors\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Tests run against the net10.0-windows build of the application itself -->
+  <!-- Tests run against the net10.0-windows build of the application itself, and the
+       net10.0 build of the core it uses -->
   <ItemGroup>
     <ProjectReference Include="..\..\OmenMon.csproj" />
+    <ProjectReference Include="..\..\Core\OmenMon.Core.csproj" />
   </ItemGroup>
 
 </Project>

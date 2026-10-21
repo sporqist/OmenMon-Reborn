@@ -43,9 +43,9 @@
     <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
     <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.5.0.0</AssemblyVersion>
     <AssemblyVersionWord Condition="'$(AssemblyVersionWord)' == ''">reborn</AssemblyVersionWord>
-    <!-- The test project and the restructuring spikes (spikes\, not in the solution) live
-         below this directory; keep their sources out of the default globs -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;spikes\**;wiki\**;docs\**</DefaultItemExcludes>
+    <!-- The core, the test project and the restructuring spikes (spikes\, not in the
+         solution) live below this directory; keep their sources out of the default globs -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Core\**;Tests\**;spikes\**;wiki\**;docs\**</DefaultItemExcludes>
   </PropertyGroup>
   <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <UseWindowsForms>true</UseWindowsForms>
@@ -92,6 +92,11 @@
     <EmbeddedResource Include="Resources\LpcACPIEC.bin" Condition="Exists('Resources\LpcACPIEC.bin')">
       <LogicalName>OmenMon.LpcACPIEC.bin</LogicalName>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The pure core (fan-safety decisions, sensor freshness, curves); OmenMon.Core.dll
+         ships next to OmenMon.exe -->
+    <ProjectReference Include="Core\OmenMon.Core.csproj" />
   </ItemGroup>
   <!-- <ItemGroup>
         <ProjectReference Include="Driver.csproj">

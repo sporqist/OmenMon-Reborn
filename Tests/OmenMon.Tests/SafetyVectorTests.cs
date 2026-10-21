@@ -5,6 +5,7 @@
 
 using System.Text;
 using System.Text.Json;
+using OmenMon.Core;
 using OmenMon.Hardware.Platform;
 using OmenMon.Tests.Fakes;
 

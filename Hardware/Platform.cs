@@ -5,6 +5,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
+using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
 using OmenMon.Library;

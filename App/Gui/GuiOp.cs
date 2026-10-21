@@ -7,6 +7,7 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Windows.Forms;
+using OmenMon.Core;
 using OmenMon.External;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
