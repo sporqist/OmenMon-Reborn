@@ -108,6 +108,9 @@ namespace OmenMon.Library.Locale {
                 // CLI: Graphics apps
                 ["CliGraphics"] = "Graphics Apps",
 
+                // CLI: GPU log
+                ["CliGpuLog"] = "GPU Log",
+
                 // CLI: Usage
                 ["CliUsage"] = "Usage Information",
                 ["CliUsageText"] =
@@ -130,6 +133,9 @@ namespace OmenMon.Library.Locale {
                     "  -Graphics Restore         Put back every GPU preference OmenMon changed (Apply Default; for uninstalling)" + Environment.NewLine +
                     "  -Graphics Adopt <Profile> [<File.reg>]" + Environment.NewLine +
                     "                            Make a profile of the GPU preferences set now, originals from a .reg export" + Environment.NewLine +
+                    "  -GpuLog [<Seconds>] [<File.csv>]" + Environment.NewLine +
+                    "                            Log which apps use the discrete GPU (engine time, VRAM) every 2 s, default 600 s;" + Environment.NewLine +
+                    "                            Ctrl+C ends early; prints a summary (read-only, does not wake the GPU)" + Environment.NewLine +
                     "  -Prog                     List available fan control programs loaded from the configuration file" + Environment.NewLine +
                     "  -Prog <Name>              Run a specified fan control program" + Environment.NewLine +
                     "  -Run <TName> [<Args>]     Run a specified task (in headless mode, no console output)" + Environment.NewLine +
