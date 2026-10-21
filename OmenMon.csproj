@@ -41,8 +41,9 @@
     <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
     <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">1.5.0.0</AssemblyVersion>
     <AssemblyVersionWord Condition="'$(AssemblyVersionWord)' == ''">reborn</AssemblyVersionWord>
-    <!-- The test project lives below this directory; keep its sources out of the default globs -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;wiki\**;docs\**</DefaultItemExcludes>
+    <!-- The test project and the restructuring spikes (spikes\, not in the solution) live
+         below this directory; keep their sources out of the default globs -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;spikes\**;wiki\**;docs\**</DefaultItemExcludes>
   </PropertyGroup>
   <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <UseWindowsForms>true</UseWindowsForms>

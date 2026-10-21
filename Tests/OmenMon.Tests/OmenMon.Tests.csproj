@@ -20,9 +20,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <!-- Configuration files the tests load (the installed 8BAC configuration, among others) -->
+  <!-- Configuration files the tests load (the installed 8BAC configuration, among others),
+       and the shared safety vectors -->
   <ItemGroup>
     <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Vectors\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Tests run against the net10.0-windows build of the application itself -->
