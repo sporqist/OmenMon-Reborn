@@ -401,6 +401,7 @@ namespace OmenMon.Library {
         public const string LockPathEc = "Global\\Access_EC"; // Commonly-observed value
         public const string LockPathCli = "Global\\OmenMonCli";
         public const string LockPathGui = "Global\\OmenMonGui";
+        public const string LockPathGuiExit = "Global\\OmenMonGuiExit";   // -Exit asks the GUI to exit (ExitSignal)
 
         // Maximum believable speed percent over maximum value when reading from the Embedded Controller (used for fan speed)
         public const int MaxBelievableFanSpeedPercentOverMax = 10;

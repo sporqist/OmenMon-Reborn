@@ -530,6 +530,20 @@ namespace OmenMon.AppCli {
                     i--;
                     break;
 
+                // Ask the running GUI to exit as the tray's Exit does, and wait for it
+                // (installers, scripts): -Exit [<Seconds>]
+                case "-exit":
+                    Cli.PrintContext(Config.Locale.Get(Config.L_CLI + "Exit"), "-Exit");
+                    int exitWait = 30;
+                    if(i + 1 < args.Length && !args[i + 1].StartsWith("-")) {
+                        if(!int.TryParse(args[++i], out exitWait) || exitWait < 0 || exitWait > 600) {
+                            App.Error("ErrArgUnknown");
+                            goto showUsage; // Interrupt the context loop
+                        }
+                    }
+                    ExitGui(exitWait);
+                    break;
+
                     // Run a full hardware probe and dump the results as Markdown
                 case "-probe":
                     ProbeRun();

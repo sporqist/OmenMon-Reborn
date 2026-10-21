@@ -451,8 +451,12 @@ namespace OmenMon.AppGui {
                 Done("Could not read the GPU preferences: " + ex.Message);
                 return;
             }
-            if(!GuiGraphicsDialogs.Confirm(this, "Apply " + plan.TargetName, GraphicsUiText.PlanSummary(plan), "Apply " + Shorten(plan.TargetName, 30)))
+            if(!GuiGraphicsDialogs.Confirm(this, "Apply " + plan.TargetName, GraphicsUiText.PlanSummary(plan), "Apply " + Shorten(plan.TargetName, 30))) {
+                // Cancel is the preview's default button, so Enter lands here: say so
+                // (an apply that silently did nothing was taken for done, 2026-10-21)
+                LblLast.Text = "Not applied: " + plan.TargetName + " was cancelled in the preview. Nothing changed.";
                 return;
+            }
 
             GraphicsResult result;
             try {

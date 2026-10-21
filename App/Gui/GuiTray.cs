@@ -105,6 +105,10 @@ namespace OmenMon.AppGui {
         // all of that state stays single-threaded. Accessed only via Interlocked.
         private int PendingPowerEventSignal = 0;
 
+        // OmenMon -Exit: the event it sets, and the wait on it
+        private EventWaitHandle ExitEvent;
+        private RegisteredWaitHandle ExitWait;
+
         // Stores the number of ticks elapsed since the last RENDER of a particular
         // category (the fan-program tick counter lives in GuiMonitor now)
         internal int UpdateIconTick;
@@ -206,6 +210,15 @@ namespace OmenMon.AppGui {
             // on the UI thread (issue #98).
             this.Monitor.Start();
 
+            // OmenMon -Exit (installers, scripts) sets this event: exit as the tray's Exit
+            // does, on this (the UI) thread
+            this.ExitEvent = ExitSignal.Create(Config.LockPathGuiExit);
+            if(this.ExitEvent != null) {
+                SynchronizationContext ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+                this.ExitWait = ThreadPool.RegisterWaitForSingleObject(this.ExitEvent,
+                    (state, timedOut) => ui.Post(_ => Application.Exit(), null), null, Timeout.Infinite, true);
+            }
+
             // Tell the user if the configuration file did not load (a balloon tip: a
             // dialog would hold up an unattended start)
             if(Config.LoadFailed)
@@ -238,6 +251,10 @@ namespace OmenMon.AppGui {
             // uncontended on the UI thread).
             if(this.Monitor != null)
                 this.Monitor.Stop();
+
+            // No more -Exit requests
+            this.ExitWait?.Unregister(null);
+            this.ExitEvent?.Dispose();
 
             // The icon has to be removed beforehand,
             // otherwise it will linger in the tray
