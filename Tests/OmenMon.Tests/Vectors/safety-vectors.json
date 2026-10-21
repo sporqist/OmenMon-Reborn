@@ -395,6 +395,11 @@
     { "id": "b-panic-08", "covers": "panic-clear", "kind": "board", "rule": "Panic turned off while active: hand-back",
       "steps": [ { "cpu": 92 }, { "tick": true }, { "expect": { "panic": true } },
                  { "panicEnabled": false }, { "advance": 3 }, { "tick": true },
-                 { "expect": { "panic": false, "writes": [[60, 63], [255, 255]] } } ] }
+                 { "expect": { "panic": false, "writes": [[60, 63], [255, 255]] } } ] },
+    { "id": "b-panic-09", "covers": "panic-enter", "kind": "board", "rule": "No CPU reading (both CPU sensors read 0) and a fresh GPU at 97 C: no panic, nothing written",
+      "steps": [ { "cpu": 40 }, { "tick": true }, { "expect": { "panic": false } },
+                 { "cpu": 0 }, { "gpu": 97 }, { "advance": 46 }, { "tick": true },
+                 { "expect": { "panic": false, "writes": [] } } ],
+      "disputed": "PLAN 3: panic at the threshold, and unknown counts as hot. Platform.GetHottestReading returns no reading at all without a CPU reading, so a GPU reading 97 C cannot start panic, while the reverse (CPU 92 C, GPU unknown) does start it as an incomplete reading (b-panic-05). On 8BAC CPUT and GPTM share the EC, so this needs CPUT implausible plus WMI 0x23 failing; low odds, but the asymmetry should go when the hottest reading moves into the core." }
   ]
 }
