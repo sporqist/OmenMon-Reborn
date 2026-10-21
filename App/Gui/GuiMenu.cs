@@ -465,6 +465,10 @@ namespace OmenMon.AppGui {
 
             bool changed = false;
 
+            // Locked until the MUX gate is passed (the items are disabled as well)
+            if(!BiosCtl.GpuModeWriteAllowed)
+                return;
+
             // Serialise the GPU read/write with the monitor (shared Settings caches)
             lock(Context.Op.HardwareLock) {
 
@@ -1112,6 +1116,14 @@ namespace OmenMon.AppGui {
                     s.GpuMode == BiosData.GpuMode.Discrete;
                 ((ToolStripMenuItem) MenuGpu.DropDownItems[I_GPU_MODE_OPTIMUS]).Checked =
                     (s.GpuMode == BiosData.GpuMode.Hybrid || s.GpuMode == BiosData.GpuMode.Optimus);
+
+                // Shown, but not switchable until the MUX gate is passed
+                if(!BiosCtl.GpuModeWriteAllowed)
+                    foreach(string item in new[] { I_GPU_MODE_DISCRETE, I_GPU_MODE_OPTIMUS }) {
+                        ToolStripMenuItem m = (ToolStripMenuItem) MenuGpu.DropDownItems[item];
+                        m.Enabled = false;
+                        m.ToolTipText = "Locked: switching the graphics mode waits for the MUX gate";
+                    }
 
             } else {
 

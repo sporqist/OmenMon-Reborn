@@ -256,11 +256,15 @@ namespace OmenMon.Hardware.Bios {
         // Retrieves the current graphics mode
         public GpuMode GetGpuMode() {
             byte[] outData;
-            // Try querying with Cmd.GpuMode first (used on newer systems, matching SetGpuMode)
-            int rc = Send(Cmd.GpuMode, 0x52, null, 4, out outData);
+            // The read command first: on 8BAC (BIOS F.30) Cmd.GpuMode (2) is the firmware's
+            // WRITE dispatcher, and type 0x52 there is the MUX switch. An empty call is
+            // refused before it writes (rc 5, input below the 4-byte minimum), but a read
+            // must not depend on that (research\mux-gate.md, 2026-10-21). Cmd.GpuMode is
+            // tried, still without data, only if the read command fails (older OmenMon
+            // read it first; some models may need it).
+            int rc = Send(Cmd.Legacy, 0x52, null, 4, out outData);
             if (rc != 0) {
-                // Fallback to Cmd.Legacy (used on older systems)
-                Send(Cmd.Legacy, 0x52, null, 4, out outData);
+                Send(Cmd.GpuMode, 0x52, null, 4, out outData);
             }
             // See: GpuMode (enum)
             // Also see: GetSystem() Byte #7 Bit #3
@@ -268,7 +272,15 @@ namespace OmenMon.Hardware.Bios {
         }
 
         // Sets the graphics mode
+        // Whether the graphics mode may be switched: not until the MUX gate is passed
+        // (research\mux-gate.md, Marius, 2026-10-21). On 8BAC the switch takes effect at the
+        // next boot, the value read (0) is not one the board lists as supported, and a
+        // wrong mode can leave the internal panel dark on a machine that runs unattended.
+        public static readonly bool GpuModeWriteAllowed = false;
+
         public void SetGpuMode(GpuMode value) {
+            if(!GpuModeWriteAllowed)
+                throw new InvalidOperationException("Switching the graphics mode is locked until the MUX gate is passed (see research\\mux-gate.md)");
             Check(Send(Cmd.GpuMode, 0x52, new byte[4] {(byte) value, 0x00, 0x00, 0x00}));
             // Note: This is not Advanced Optimus, a reboot is required
             // The functionality is equivalent to changing the setting in the BIOS

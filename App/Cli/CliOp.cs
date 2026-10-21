@@ -125,6 +125,12 @@ namespace OmenMon.AppCli {
 
                                     // Switch the graphics mode (a reboot is required)
                                     case "gpumode":
+                                        // Locked until the MUX gate is passed (BiosCtl.GpuModeWriteAllowed)
+                                        if(!BiosCtl.GpuModeWriteAllowed) {
+                                            Cli.PrintError("Switching the graphics mode is locked until the MUX gate is passed");
+                                            Environment.ExitCode = 1;
+                                            break;
+                                        }
                                         BiosSet<BiosData.GpuMode>(Config.Locale.Get(Config.L_CLI_BIOS + "GpuMode"), opArgs[1], Hw.Bios.SetGpuMode, "ErrNeedValueGpuMode|DataSyntaxGpuMode");
                                         break;
 

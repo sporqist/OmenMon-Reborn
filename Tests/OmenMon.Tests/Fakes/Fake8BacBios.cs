@@ -48,6 +48,9 @@ namespace OmenMon.Tests.Fakes {
         // Every call, in order: (command type, input payload)
         public List<(uint Type, byte[] Data)> Calls { get; } = new List<(uint, byte[])>();
 
+        // The command of every call, in the same order as Calls
+        public List<BiosData.Cmd> Commands { get; } = new List<BiosData.Cmd>();
+
         public BiosData.FanMode? LastFanMode { get; private set; }
 
         private DateTime? lastQueryAt;
@@ -99,6 +102,7 @@ namespace OmenMon.Tests.Fakes {
 
             byte[] data = inData == null ? new byte[4] : (byte[]) inData.Clone();
             this.Calls.Add((commandType, data));
+            this.Commands.Add(command);
             outData = new byte[outDataSize];
 
             if(this.FailAll || this.FailTypes.Contains(commandType))
