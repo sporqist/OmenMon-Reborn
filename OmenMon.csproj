@@ -22,6 +22,8 @@
     <!-- net48 builds to Bin\ as before; other targets to Bin\<TargetFramework>\ -->
     <OutputPath>Bin\</OutputPath>
     <AppendTargetFrameworkToOutputPath Condition="'$(TargetFramework)' == 'net48'">false</AppendTargetFrameworkToOutputPath>
+    <!-- Each target framework keeps its own intermediate directory (see DeleteDirs) -->
+    <IntermediateOutputPath Condition="'$(TargetFramework)' == 'net48'">obj\$(Configuration)\net48\</IntermediateOutputPath>
     <OutputType>WinExe</OutputType>
     <PlatformTarget>x64</PlatformTarget>
     <ProjectGuid>{F6104868-81A7-4D09-8AD2-8CF261D58319}</ProjectGuid>
@@ -123,8 +125,12 @@
     <Copy SourceFiles="OmenMon.xml" DestinationFolder="$(OutDir)" />
     <!-- <Exec Command="robocopy /nc /ndl /nfl /njh /njs /np /ns /r:2 /w:5 Bin \\Momentum\Exchange\ OmenMon.*" IgnoreExitCode="true" /> -->
   </Target>
-  <Target Name="DeleteDirs" AfterTargets="Clean">
+  <!-- Per target framework, so that no build removes what another one is building at the
+       same time: net48's Bin\ also holds Bin\net10.0-windows\, so net48 removes only its
+       own files there -->
+  <Target Name="DeleteDirs" AfterTargets="Clean" Condition="'$(TargetFramework)' != ''">
     <RemoveDir Directories="$(IntermediateOutputPath)" />
-    <RemoveDir Directories="$(OutputPath)" />
+    <RemoveDir Directories="$(OutputPath)" Condition="'$(TargetFramework)' != 'net48'" />
+    <Delete Files="$(OutDir)OmenMon.xml" Condition="'$(TargetFramework)' == 'net48'" />
   </Target>
 </Project>
