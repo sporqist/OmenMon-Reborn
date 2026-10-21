@@ -23,6 +23,7 @@ namespace OmenMon.Tests {
         // anything that reaches the system belongs in the application, not here.
         private static readonly HashSet<string> AllowedNamespaces = new HashSet<string> {
             "System",
+            "System.Collections",                // IEnumerator, which foreach uses
             "System.Collections.Generic",
             "System.Diagnostics",                // DebuggableAttribute only, see below
             "System.Reflection",                 // assembly attributes

@@ -5,6 +5,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
+using System.Collections.Generic;
 using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
@@ -375,21 +376,11 @@ namespace OmenMon.Hardware.Platform {
 
         // Highest fresh valid reading among the sensors with the given name
         private SensorReading GetFreshReading(string name, DateTime now) {
-            SensorReading best = SensorReading.None;
-            for(int i = 0; i < this.Temperature.Length; i++) {
-                if(this.Temperature[i].GetName() != name)
-                    continue;
-                SensorReading r = this.Temperature[i].GetReading();
-                if(r.IsFresh(now, ReadingMaxAge) && (!best.HasValue || r.Value > best.Value))
-                    best = r;
-            }
-            return best;
-        }
-
-        private static SensorReading Hotter(SensorReading a, SensorReading b) {
-            if(!a.HasValue) return b;
-            if(!b.HasValue) return a;
-            return b.Value > a.Value ? b : a;
+            var readings = new List<SensorReading>();
+            for(int i = 0; i < this.Temperature.Length; i++)
+                if(this.Temperature[i].GetName() == name)
+                    readings.Add(this.Temperature[i].GetReading());
+            return SensorReadings.HottestFresh(readings, now, ReadingMaxAge);
         }
 
         // CPU temperature for control decisions: the higher of the fresh CPUT and BIOS
@@ -400,7 +391,7 @@ namespace OmenMon.Hardware.Platform {
             if(forceUpdate)
                 UpdateTemperature(false);
             DateTime now = PlatformClock.UtcNow;
-            return Hotter(GetFreshReading("CPUT", now), GetFreshReading("BIOS", now));
+            return SensorReadings.Hotter(GetFreshReading("CPUT", now), GetFreshReading("BIOS", now));
         }
 
         // GPU temperature history for control decisions: the GPTM sensor's last valid
@@ -430,32 +421,19 @@ namespace OmenMon.Hardware.Platform {
         // (thermal panic may start on it, never end on it). Without a fresh CPU reading it
         // is incomplete too, and the hottest of the rest still counts: a GPU at 97 °C
         // must start panic even while the CPU does not read (Marius, 2026-10-21; the
-        // reverse case already did). None only if nothing reads.
+        // reverse case already did). None only if nothing reads. The rules are in the
+        // core (SensorReadings.Hottest); this reads the sensors for it.
         public SensorReading GetHottestReading(bool forceUpdate, out bool complete) {
             if(forceUpdate)
                 UpdateTemperature(false);
-            complete = true;
             DateTime now = PlatformClock.UtcNow;
-            SensorReading hottest = GetCpuReading(false);
-            if(!hottest.HasValue)
-                complete = false;
+            SensorReading cpu = GetCpuReading(false);
             GpuReading gpu = GetGpuReading(false);
-            switch(gpu.StateAt(now, ReadingMaxAge)) {
-                case GpuState.Unknown:
-                    complete = false;
-                    break;
-                case GpuState.Fresh:
-                    hottest = Hotter(hottest, gpu.Last);
-                    break;
-            }
-            for(int i = 0; i < this.Temperature.Length; i++) {
-                if(!this.TemperatureUse[i])
-                    continue;
-                SensorReading r = this.Temperature[i].GetReading();
-                if(r.IsFresh(now, ReadingMaxAge))
-                    hottest = Hotter(hottest, r);
-            }
-            return hottest;
+            var others = new List<SensorReading>();
+            for(int i = 0; i < this.Temperature.Length; i++)
+                if(this.TemperatureUse[i])
+                    others.Add(this.Temperature[i].GetReading());
+            return SensorReadings.Hottest(cpu, gpu, others, now, ReadingMaxAge, out complete);
         }
 
         // Reports whether this platform has demonstrated a usable GPU temperature
