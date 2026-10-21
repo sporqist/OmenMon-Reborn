@@ -282,99 +282,20 @@ namespace OmenMon.Hardware.Platform {
 #endregion
 
 #region Private Methods
-        // Chooses the fan levels for the current readings. Each fan follows its own
-        // component's temperature, except:
-        //   * No fresh CPU reading (EC lock timeouts, WMI failure, implausible values for
-        //     longer than Platform.ReadingMaxAge): the temperature is unknown, so both
-        //     fans get the program's highest row. Unknown is treated as hot, never as
-        //     cold — previously a failed read was 0 °C and selected the lowest row
-        //     (possibly 0/0, fans off) and re-sent it every program tick.
-        //   * GPU state unknown (it has read before, and now its reads fail or are
-        //     implausible for longer than Platform.ReadingMaxAge, with no 0 read either):
-        //     the GPU fan gets the program's highest row, and so does the CPU fan when
-        //     the fans share the temperature. Before, a failed GPU read was taken for a
-        //     parked GPU, and the GPU fan followed the CPU while the GPU was hot.
-        //   * GPU parked (reads 0) or never observed (a board without a GPU sensor):
-        //     the GPU fan follows the CPU temperature. This replaces the issue #66 rule
-        //     that left the GPU fan on the 0 °C row whenever the GPU had once been seen
-        //     and then read 0 — on boards whose fans share heat pipes that idled the GPU
-        //     fan under full CPU load.
-        // gpuValue counts only when gpuState is Fresh.
+        // Chooses the fan levels for the current readings from the program's table (see
+        // FanCurve.Select in the core for the unknown-temperature rules). The table is
+        // looked up in the configuration on every tick, as before.
         internal byte[] SelectLevels(SensorReading cpu, GpuState gpuState, int gpuValue, out bool safeLevel) {
 
-            byte[] top = GetFanLevel(this.Levels[this.Levels.Count - 1]);
+            return new FanCurve(this.Levels, Config.FanProgram[this.Name].Level)
+                .Select(cpu, gpuState, gpuValue, Config.FanProgramSharedTemperature, out safeLevel);
 
-            if(!cpu.HasValue) {
-                safeLevel = true;
-                return new byte[] { top[0], top[1] };
-            }
-
-            byte cpuTemp = ClampTemperature(cpu.Value);
-
-            if(gpuState == GpuState.Unknown) {
-                safeLevel = true;
-                if(Config.FanProgramSharedTemperature)
-                    return new byte[] { top[0], top[1] };
-                return new byte[] { GetFanLevel(GetTemperatureLevel(cpuTemp))[0], top[1] };
-            }
-
-            safeLevel = false;
-            byte gpuTemp = gpuState == GpuState.Fresh ? ClampTemperature(gpuValue) : cpuTemp;
-
-            // Both fans follow the hotter chip when configured to share it
-            // (common heat pipes, e.g. 8BAC); otherwise each fan follows its own
-            if(Config.FanProgramSharedTemperature)
-                cpuTemp = gpuTemp = Math.Max(cpuTemp, gpuTemp);
-
-            // CPU fan speed from the CPU-temperature row,
-            // GPU fan speed from the GPU-temperature row
-            byte[] cpuFans = GetFanLevel(GetTemperatureLevel(cpuTemp));
-            byte[] gpuFans = GetFanLevel(GetTemperatureLevel(gpuTemp));
-            return new byte[] { cpuFans[0], gpuFans[1] };
-
-        }
-
-        private static byte ClampTemperature(int value) {
-            return (byte) Math.Max(0, Math.Min(byte.MaxValue, value));
         }
 
         // Formats a reading for the status line ("--" when there is none)
         private static string FormatReading(SensorReading reading) {
             return (reading.HasValue ? Conv.GetString((uint) reading.Value, 2, 10) : "--")
                 + Config.Locale.Get(Config.L_UNIT + "Temperature");
-        }
-
-        // Obtains the fan levels for the given temperature level
-        private byte[] GetFanLevel(byte level) {
-
-            // Retrieve the value from the configuration data
-            return Config.FanProgram[this.Name].Level[level];
-
-        }
-
-        // Obtains the program level for the given temperature
-        private byte GetTemperatureLevel(byte temperature) {
-            int value;
-
-            // Binary-search the level list
-            // If the result is non-negative, an index was found
-            if((value = Levels.BinarySearch(temperature)) >= 0)
-
-                // Return the item at the index directly
-                return this.Levels[value];
-
-            // The result is a bitwise complement of the next larger item index,
-            // or the index of the last element of the list if no larger item exists
-            else {
-
-                // Return the item at the binary complement index less one,
-                // clamped to a minimum of 0 to avoid OutOfBoundsException if the
-                // temperature is lower than the lowest defined threshold in the curve.
-                int index = ~value - 1;
-                return this.Levels[index < 0 ? 0 : index];
-
-            }
-
         }
 
         // Resets the state data when terminating a program

@@ -71,6 +71,53 @@ namespace OmenMon.Tests {
             }
         }
 
+        // Fan-program curve evaluation, now in the core (FanCurve); FanProgram.SelectLevels
+        // delegates to it and SharedTemperatureTests cover it through the program
+        private static FanCurve Curve() {
+            var table = new SortedDictionary<byte, byte[]> {
+                { 36, new byte[] { 22, 25 } },
+                { 50, new byte[] { 30, 33 } },
+                { 70, new byte[] { 45, 48 } },
+                { 85, new byte[] { 55, 58 } } };
+            return new FanCurve(table.Keys, table);
+        }
+
+        [Theory]
+        [InlineData(0, 36)]     // below the lowest threshold: the lowest row
+        [InlineData(36, 36)]
+        [InlineData(49, 36)]
+        [InlineData(50, 50)]
+        [InlineData(84, 70)]
+        [InlineData(85, 85)]
+        [InlineData(255, 85)]
+        public void Curve_Threshold(byte temperature, byte threshold) {
+            Assert.Equal(threshold, Curve().Threshold(temperature));
+        }
+
+        [Fact]
+        public void Curve_UnknownCpu_GetsTheTopRow() {
+            byte[] levels = Curve().Select(SensorReading.None, GpuState.Fresh, 40, false, out bool safe);
+            Assert.True(safe);
+            Assert.Equal(new byte[] { 55, 58 }, levels);
+        }
+
+        // Out-of-range values are clamped to 0..255 before the look-up, as before
+        [Fact]
+        public void Curve_ClampsTemperatures() {
+            DateTime now = new DateTime(2026, 10, 21, 12, 0, 0, DateTimeKind.Utc);
+            Assert.Equal(new byte[] { 22, 58 }, Curve().Select(new SensorReading(-5, now), GpuState.Fresh, 300, false, out bool safe));
+            Assert.False(safe);
+        }
+
+        // The result is a new array: changing it never changes the table
+        [Fact]
+        public void Curve_ReturnsACopy() {
+            FanCurve curve = Curve();
+            byte[] levels = curve.Select(SensorReading.None, GpuState.Parked, 0, true, out _);
+            levels[0] = 0;
+            Assert.Equal(new byte[] { 55, 58 }, curve.Top);
+        }
+
     }
 
 }
