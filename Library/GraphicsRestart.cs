@@ -383,6 +383,8 @@ namespace OmenMon.Library {
         EndFailed,              // the user chose to end it, and it is still running
         LaunchFailed,           // closed, but it could not be started again
         StartedElevatedEnded,   // closed; the new process would have run elevated and was ended
+        ElevatedCopyLeft,       // closed and started unelevated; an elevated copy appeared as well (through a
+                                // UAC prompt the user answered, not from OmenMon): reported, left running
         NotSeenRunning,         // closed and started, but not seen running within the verify time
         Unverified              // closed and started; whether the new process is elevated could not be read
     }
@@ -558,9 +560,11 @@ namespace OmenMon.Library {
             return Verify(e, r, before);
         }
 
-        // Waits for a new process of the app. One that runs elevated is ended at once:
-        // OmenMon started it a moment ago, it holds nothing of the user's, and a
-        // restarted app never runs elevated.
+        // Waits for a new process of the app. The process OmenMon started was checked
+        // unelevated before it ran (UnelevatedLauncher), so a new one that runs elevated
+        // got that from a UAC prompt the user answered: the app elevating itself, or
+        // the user starting it as administrator. It is reported, never ended (Marius,
+        // 2026-10-21: report only).
         private RestartResult Verify(RestartEntry e, RestartResult r, HashSet<string> before) {
             string key = RestartPlanner.NormalizeKey(e.AppKey);
             DateTime deadline = this.clock() + VerifyTimeout;
@@ -573,10 +577,9 @@ namespace OmenMon.Library {
                     r.Started = fresh;
                     List<ProcessEntry> elevated = fresh.Where(p => p.Elevated == true).ToList();
                     if(elevated.Count > 0) {
-                        foreach(ProcessEntry p in elevated)
-                            this.closer.EndProcess(p);
-                        r.Outcome = RestartOutcome.StartedElevatedEnded;
-                        r.Detail = "ended " + string.Join(", ", elevated.Select(p => p.ToString())) + ": it ran elevated";
+                        r.Outcome = RestartOutcome.ElevatedCopyLeft;
+                        r.Detail = string.Join(", ", elevated.Select(p => p.ToString()))
+                            + " runs as administrator: started through a UAC prompt, not by OmenMon; left running";
                     } else if(fresh.Any(p => p.Elevated == null)) {
                         r.Outcome = RestartOutcome.Unverified;
                     } else

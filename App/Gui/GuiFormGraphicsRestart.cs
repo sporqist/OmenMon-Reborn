@@ -192,7 +192,7 @@ namespace OmenMon.AppGui {
             foreach(RestartResult r in results)
                 sb.Append(RestartText.Describe(r)).Append("\r\n");
             TxtResults.Text = sb.ToString();
-            int restarted = results.Count(r => r.Outcome == RestartOutcome.Restarted);
+            int restarted = results.Count(r => r.Outcome == RestartOutcome.Restarted || r.Outcome == RestartOutcome.ElevatedCopyLeft);
             LblProgress.Text = "Done: " + restarted + " of " + results.Count + " app(s) restarted. Every result is in "
                 + GraphicsState.LogName + ".";
             BtnLater.Text = "Close";

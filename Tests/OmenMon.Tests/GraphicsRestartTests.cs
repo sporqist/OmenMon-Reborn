@@ -521,16 +521,19 @@ namespace OmenMon.Tests {
             Assert.Equal(status, Assert.Single(r.Launches).Status);
         }
 
-        // Safety: a new process of the app that runs elevated anyway is ended at once
+        // A new process of the app that runs elevated got that through a UAC prompt the
+        // user answered (OmenMon's own start is checked unelevated before it runs):
+        // reported, never ended (Marius, 2026-10-21: report only)
         [Fact]
-        public void Restart_NewProcessRunsElevated_IsEnded() {
+        public void Restart_NewProcessRunsElevated_IsReportedNotEnded() {
             AddChrome();
             this.launcher.NewElevated = true;
             RestartResult r = NewCoordinator().Restart(Only(Chrome));
-            Assert.Equal(RestartOutcome.StartedElevatedEnded, r.Outcome);
+            Assert.Equal(RestartOutcome.ElevatedCopyLeft, r.Outcome);
             int started = Assert.Single(r.Launches).Pid;
-            Assert.Equal(new[] { started }, this.closer.Ended);
-            Assert.False(this.catalog.IsRunning(started));
+            Assert.Empty(this.closer.Ended);
+            Assert.True(this.catalog.IsRunning(started));
+            Assert.Contains("left running", r.Detail);
         }
 
         [Fact]
