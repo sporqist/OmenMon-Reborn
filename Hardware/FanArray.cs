@@ -31,7 +31,8 @@ namespace OmenMon.Hardware.Platform {
         public FanSafetyGuard Guard { get; set; }
 
         // Hands fan control back to the BIOS: a safe last level if OmenMon holds one,
-        // then 255/255. ReleaseIfHeld() does nothing if OmenMon holds no level.
+        // then silence (without a guard, legacy: 255/255). ReleaseIfHeld() does nothing
+        // if OmenMon holds no level.
         public void Release();
         public void ReleaseIfHeld();
 
@@ -192,13 +193,16 @@ namespace OmenMon.Hardware.Platform {
         // a last level is written first)
         public void Release() {
 
-            if(this.Guard != null && this.Guard.HoldsLevel) {
+            if(this.Guard == null) {
+                WriteLevels(new byte[] { FanSafetyGuard.NoChange, FanSafetyGuard.NoChange });
+                return;
+            }
+
+            if(this.Guard.HoldsLevel) {
                 ArmFanLevel(true);
                 WriteLevels(this.Guard.HandBackLevel());
             }
-
-            WriteLevels(new byte[] { FanSafetyGuard.NoChange, FanSafetyGuard.NoChange });
-            this.Guard?.RecordRelease();
+            this.Guard.RecordRelease();
 
         }
 

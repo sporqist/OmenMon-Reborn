@@ -1,4 +1,4 @@
-  //\\   OmenMon: Hardware Monitoring & Control Utility
+﻿  //\\   OmenMon: Hardware Monitoring & Control Utility
  //  \\  Copyright © 2023-2024 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 
@@ -172,7 +172,7 @@ namespace OmenMon.Hardware.Platform {
             // Set the state flag
             this.IsSuspended = true;
 
-            // Hand fan control back to the BIOS (a safe last level, then 255/255;
+            // Hand fan control back to the BIOS (a safe last level, then silence;
             // see FanSafetyGuard.HandBackLevel)
             this.Platform.Fans.Release();
 
@@ -198,7 +198,7 @@ namespace OmenMon.Hardware.Platform {
             if(!this.IsEnabled)
                 return false;
 
-            // Hand fan control back to the BIOS (a safe last level, then 255/255;
+            // Hand fan control back to the BIOS (a safe last level, then silence;
             // see FanSafetyGuard.HandBackLevel)
             this.Platform.Fans.Release();
 

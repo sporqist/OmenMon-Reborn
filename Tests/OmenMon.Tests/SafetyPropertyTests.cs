@@ -227,6 +227,7 @@ namespace OmenMon.Tests {
 
                 int callsBefore = this.rig.Bios.Calls.Count;
                 bool panicBefore = this.rig.Fans.Guard.IsPanic;
+                DateTime? releasedBefore = this.rig.Fans.Guard.ReleasedAt;
                 bool request = false, handBack = false, tick = false, zeroRequest = false;
                 string what;
 
@@ -304,18 +305,16 @@ namespace OmenMon.Tests {
                         .Select(c => c.Type == 0x2E ? c.Data[0] + "/" + c.Data[1] : "0x10")) : "")
                     + (cool ? " [cool]" : "") + (panicAfter ? " [panic]" : ""));
 
-                // A hand-back ends at 255/255; the level written just before it is the one
-                // left in effect
+                // A hand-back writes a safe level, then nothing: the last level written in
+                // a step that handed back is the one left in effect
+                DateTime? releasedAfter = this.rig.Fans.Guard.ReleasedAt;
+                bool handedBack = releasedAfter.HasValue && (releasedAfter != releasedBefore || handBack);
                 byte[]? previous = null;
                 foreach(var c in calls) {
                     if(c.Type != 0x2E)
                         continue;
-                    bool ffff = c.Data[0] == 0xFF && c.Data[1] == 0xFF;
-                    if(ffff) {
-                        if(previous != null && (previous[0] < FloorCpu || previous[1] < FloorGpu))
-                            return "P1: hand-back left " + previous[0] + "/" + previous[1] + ", below the floor";
-                        continue;
-                    }
+                    if(c.Data[0] == 0xFF && c.Data[1] == 0xFF)
+                        return "P4: 255/255 sent (" + what + ")";
                     previous = new byte[] { c.Data[0], c.Data[1] };
                     if((c.Data[0] < FloorCpu || c.Data[1] < FloorGpu) && !cool)
                         return "P1: sent " + c.Data[0] + "/" + c.Data[1] + " while not known cool";
@@ -324,6 +323,8 @@ namespace OmenMon.Tests {
                     if(c.Data[0] == 0 && c.Data[1] == 0 && !cool)
                         return "P3: sent 0/0 while not known cool";
                 }
+                if(handedBack && previous != null && (previous[0] < FloorCpu || previous[1] < FloorGpu))
+                    return "P1: hand-back left " + previous[0] + "/" + previous[1] + ", below the floor";
 
                 // P1 on what the fans do: after a pass, the board runs below the floor only
                 // while known cool (a held level that is no longer allowed has been raised)
@@ -364,7 +365,7 @@ namespace OmenMon.Tests {
                 this.stats.Steps++;
                 if(!panicBefore && panicAfter) this.stats.PanicEntered++;
                 if(panicBefore && !panicAfter) this.stats.PanicCleared++;
-                this.stats.HandBacks += calls.Count(c => c.Type == 0x2E && c.Data[0] == 0xFF && c.Data[1] == 0xFF);
+                if(handedBack) this.stats.HandBacks++;
                 this.stats.ZeroSent += calls.Count(c => c.Type == 0x2E && c.Data[0] == 0 && c.Data[1] == 0);
                 if(zeroRequest && !cool && !calls.Any(c => c.Type == 0x2E && c.Data[0] == 0 && c.Data[1] == 0)) this.stats.ZeroRefused++;
                 if(tick && !this.model.Cpu(this.Now).HasValue) this.stats.Stale++;
@@ -372,11 +373,9 @@ namespace OmenMon.Tests {
                 // P4: silence after a hand-back
                 if(panicBefore || panicAfter || (request && !handBack))
                     this.quietSince = null;
-                foreach(var c in calls) {
-                    if(c.Type == 0x2E && c.Data[0] == 0xFF && c.Data[1] == 0xFF) {
-                        this.quietSince = this.Now;
-                        continue;
-                    }
+                if(handedBack)
+                    this.quietSince = this.Now; // the step's own calls are the hand-back
+                else foreach(var c in calls) {
                     if(!request && !panicBefore && !panicAfter && (c.Type == 0x2E || c.Type == 0x10)
                         && this.quietSince.HasValue && this.Now - this.quietSince.Value < Quiet)
                         return "P4: 0x" + c.Type.ToString("X2") + " " + (int) (this.Now - this.quietSince.Value).TotalSeconds

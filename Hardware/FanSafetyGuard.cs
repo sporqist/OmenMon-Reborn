@@ -147,7 +147,9 @@ namespace OmenMon.Hardware.Platform {
     //     (the fan-table maximum), and Supervise() re-sends it on every pass.
     //   * Hand-back: see HandBackLevel().
     //
-    // 255 (0xFF) is the "no change" sentinel and is passed through untouched.
+    // 255 (0xFF) is the "no change" sentinel. 255/255 passes the filter untouched
+    // (FanArray handles it as a hand-back); a 255 for one fan gets the rules like any
+    // other value, see Filter().
     public sealed class FanSafetyGuard {
 
         public const byte NoChange = 0xFF;
@@ -194,6 +196,9 @@ namespace OmenMon.Hardware.Platform {
         public FanLevelSource RequestedSource { get { return this.requestedSource; } }
         public byte[] Written { get { return Copy(this.written); } }
         public bool IsPanic { get { return this.panicLevel != null; } }
+
+        // When control was last handed back, null if a level was written since
+        public DateTime? ReleasedAt { get { return this.released ? this.releasedAt : (DateTime?) null; } }
 
         // Whether OmenMon currently holds the fans at a level it set
         public bool HoldsLevel { get { return this.written != null; } }
@@ -268,8 +273,16 @@ namespace OmenMon.Hardware.Platform {
 
             for(int i = 0; i < 2; i++) {
 
-                if(result[i] == NoChange)
-                    continue;
+                // 255 for one fan leaves that fan where it is (8BAC, measured 2026-10-21),
+                // so it is judged at the level last written for it. With none known it is
+                // judged as 0 and stays 255 only if no rule raises it.
+                bool unknown = false;
+                if(result[i] == NoChange) {
+                    if(result[1 - i] == NoChange)
+                        continue;
+                    unknown = this.written == null || this.written[i] == NoChange;
+                    result[i] = unknown ? (byte) 0 : this.written[i];
+                }
 
                 if(this.panicLevel != null && result[i] < this.panicLevel[i])
                     result[i] = this.panicLevel[i];
@@ -284,6 +297,9 @@ namespace OmenMon.Hardware.Platform {
                     if(result[i] < min)
                         result[i] = min;
                 }
+
+                if(unknown && result[i] == 0)
+                    result[i] = NoChange;
 
             }
 
@@ -357,8 +373,8 @@ namespace OmenMon.Hardware.Platform {
         // more 0x2E, and no 0x10 heartbeat for HandBackQuietPeriod), and let it expire.
         // The level is the last one written, but never below the floor: if OmenMon had
         // the fans off, the two minutes until the BIOS takes over run at the floor
-        // instead of with the fans stopped. On boards where 255/255 does mean "auto",
-        // the 255/255 written after this level hands control back immediately.
+        // instead of with the fans stopped. Nothing follows the level: a 255/255 after
+        // it changes nothing on 8BAC, and its 0x10 would only restart the ~124 s.
         public byte[] HandBackLevel() {
             byte[] level = new byte[2];
             bool cool = IsCool();

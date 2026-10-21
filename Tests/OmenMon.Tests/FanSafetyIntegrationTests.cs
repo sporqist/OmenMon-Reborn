@@ -96,7 +96,7 @@ namespace OmenMon.Tests {
         }
 
         [Fact]
-        public void Release_WritesSafeLevelThenFfFf_AndBiosCurveResumes() {
+        public void Release_WritesSafeLevelThenSilence_AndBiosCurveResumes() {
             var rig = new TestRig();
             rig.SetCpuTemperature(40);
             Sample(rig);
@@ -107,8 +107,8 @@ namespace OmenMon.Tests {
             rig.Advance(10);
             rig.Fans.Release();
             var writes = rig.Bios.LevelWrites;
-            Assert.Equal(new byte[] { 20, 22 }, writes[^2]);
-            Assert.Equal(new byte[] { 0xFF, 0xFF }, writes[^1]);
+            Assert.Equal(new byte[] { 20, 22 }, writes[^1]);
+            Assert.DoesNotContain(rig.Bios.LevelWrites, w => w[0] == 0xFF && w[1] == 0xFF);
             Assert.Equal(new byte[] { 20, 22 }, rig.Bios.MeasuredLevels);
             Assert.False(rig.Fans.HeartbeatAllowed);
 
@@ -135,8 +135,8 @@ namespace OmenMon.Tests {
             Heartbeat(rig);
             rig.Fans.SetLevels(new byte[] { 40, 40 });
             rig.Fans.SetLevels(new byte[] { 0xFF, 0xFF });
-            Assert.Equal(new byte[] { 40, 40 }, rig.Bios.LevelWrites[^2]);
-            Assert.Equal(new byte[] { 0xFF, 0xFF }, rig.Bios.LevelWrites[^1]);
+            Assert.Equal(new byte[] { 40, 40 }, rig.Bios.LevelWrites[^1]);
+            Assert.DoesNotContain(rig.Bios.LevelWrites, w => w[0] == 0xFF && w[1] == 0xFF);
             Assert.False(rig.Fans.HeartbeatAllowed);
         }
 
@@ -151,8 +151,8 @@ namespace OmenMon.Tests {
             Assert.True(rig.Bios.FansOff);
 
             program.Terminate();
-            Assert.Equal(new byte[] { 20, 22 }, rig.Bios.LevelWrites[^2]);
-            Assert.Equal(new byte[] { 0xFF, 0xFF }, rig.Bios.LevelWrites[^1]);
+            Assert.Equal(new byte[] { 20, 22 }, rig.Bios.LevelWrites[^1]);
+            Assert.DoesNotContain(rig.Bios.LevelWrites, w => w[0] == 0xFF && w[1] == 0xFF);
             Assert.False(rig.Bios.FansOff);
         }
 
@@ -165,8 +165,8 @@ namespace OmenMon.Tests {
             var program = new FanProgram(rig.Platform, (s, m) => { });
             program.Run(Program);
             Assert.True(program.Suspend());
-            Assert.Equal(new byte[] { 35, 35 }, rig.Bios.LevelWrites[^2]);
-            Assert.Equal(new byte[] { 0xFF, 0xFF }, rig.Bios.LevelWrites[^1]);
+            Assert.Equal(new byte[] { 35, 35 }, rig.Bios.LevelWrites[^1]);
+            Assert.DoesNotContain(rig.Bios.LevelWrites, w => w[0] == 0xFF && w[1] == 0xFF);
             Assert.False(rig.Fans.HeartbeatAllowed);
         }
 
@@ -200,7 +200,8 @@ namespace OmenMon.Tests {
             Assert.Equal(before + 1, rig.Bios.LevelWrites.Count);
 
             rig.Fans.SetPanic(false);
-            Assert.Equal(new byte[] { 0xFF, 0xFF }, rig.Bios.LevelWrites[^1]);
+            Assert.Equal(panic, rig.Bios.LevelWrites[^1]); // the held level is left in effect
+            Assert.DoesNotContain(rig.Bios.LevelWrites, w => w[0] == 0xFF && w[1] == 0xFF);
             Assert.False(rig.Fans.HeartbeatAllowed);
         }
 

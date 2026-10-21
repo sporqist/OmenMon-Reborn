@@ -17,7 +17,8 @@ namespace OmenMon.Tests.Fakes {
     //   * Without refresh (0x2E or 0x10), an active level expires ExpiryAfter (~124 s)
     //     after the last refresh and the BIOS curve resumes.
     //   * 0/0 means both fans OFF, not automatic.
-    //   * There is no release command; 255/255 keeps the current speed.
+    //   * There is no release command; 255/255 keeps the current speed, and 255 for one
+    //     fan leaves that fan where it is.
     //   * 0x2D reports the measured fan levels, 0x23 one temperature (CPU).
     //   * 0x27 (Max Fan) and 0x32 (fan table write) are accepted and ignored.
     //
@@ -126,7 +127,11 @@ namespace OmenMon.Tests.Fakes {
                     if(data[0] == 0xFF && data[1] == 0xFF)
                         return 0; // keeps the current speed
                     if(this.lastQueryAt.HasValue && this.Now - this.lastQueryAt.Value <= this.ArmWindow) {
-                        this.active = new byte[] { data[0], data[1] };
+                        // 255 for one fan leaves that fan where it is (measured 2026-10-21)
+                        byte[] current = this.active ?? this.CurveLevels;
+                        this.active = new byte[] {
+                            data[0] == 0xFF ? current[0] : data[0],
+                            data[1] == 0xFF ? current[1] : data[1] };
                         this.activeRefreshedAt = this.Now;
                     }
                     return 0;
