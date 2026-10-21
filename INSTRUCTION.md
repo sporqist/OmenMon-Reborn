@@ -38,6 +38,18 @@
 
 ---
 
+## Installing, Upgrading, Uninstalling
+
+A setup program (Inno Setup, `installer\OmenMon.iss`; build it with `installer\build-installer.ps1`, which needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)) installs OmenMon for all users to `C:\Program Files\OmenMon` and adds a Start menu entry.
+
+**Installing.** The optional task *Start OmenMon with Windows* creates the scheduled task `OmenMon` (logon trigger, highest rights, `OmenMon.exe -Run Gui`) by calling `OmenMon.exe -Task Gui=On`: the same code as the tray menu's Autorun toggle. A default `OmenMon.xml` is copied only if there is none yet; your own is never overwritten.
+
+**Upgrading.** Run the new setup over the old install. Before any file is replaced, setup runs `OmenMon.exe -Exit 30`, which asks the running OmenMon of that folder to exit gracefully (the fans go back to the BIOS, Eco+ is restored) and waits up to 30 seconds. If OmenMon is still running, setup stops with a message; it never kills the process. Afterwards OmenMon is started again (through the task if autostart is on). Your `OmenMon.xml` and the `OmenMon-*.state` files stay.
+
+**Uninstalling.** The uninstaller exits OmenMon the same way (and stops if it cannot), then restores what OmenMon changed in Windows: `OmenMon.exe -EcoPlus Restore` (turbo boost, refresh rate) and `OmenMon.exe -Graphics Restore` (per-app GPU preferences), with their output in the uninstall log (run it with `/LOG`). Then it deletes the `OmenMon` task (only if it starts this install's exe) and asks, default *No*, whether to delete `OmenMon.xml` and the `OmenMon-*.state` and `*.log` files. The fans need no restoring: a fan level set by OmenMon lapses about two minutes after OmenMon exits and the BIOS curve takes over.
+
+---
+
 ## Fan Control Modes
 
 ### Auto (Default)
