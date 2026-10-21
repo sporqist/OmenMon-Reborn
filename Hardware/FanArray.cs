@@ -4,6 +4,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
+using System.Collections.Generic;
 using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
@@ -280,33 +281,28 @@ namespace OmenMon.Hardware.Platform {
         // least the warm safety curve's top step (60/63 by default), the level the guard
         // gives an unknown temperature. Not cached, so the next panic reads the table
         // again: a single failed read must not hold the panic level down for the life of
-        // the process.
+        // the process. The rules are in the core (PanicLevel); this reads the table.
         public byte[] GetPanicLevel() {
 
             if(this.panicLevel != null)
                 return new byte[] { this.panicLevel[0], this.panicLevel[1] };
 
-            byte[] table = new byte[2];
+            var rows = new List<(byte Cpu, byte Gpu)>();
             try {
                 BiosData.FanTable data = this.Bios.GetFanTable();
                 if(data.Level != null)
-                    foreach(BiosData.FanLevel row in data.Level) {
-                        if(row.Fan1Level <= 100 && row.Fan1Level > table[0]) table[0] = row.Fan1Level;
-                        if(row.Fan2Level <= 100 && row.Fan2Level > table[1]) table[1] = row.Fan2Level;
-                    }
+                    foreach(BiosData.FanLevel row in data.Level)
+                        rows.Add((row.Fan1Level, row.Fan2Level));
             } catch { }
+            byte[] table = PanicLevel.TableMaximum(rows);
 
-            if(table[0] > 0 && table[1] > 0) {
+            if(PanicLevel.IsComplete(table)) {
                 this.panicLevel = table;
                 return new byte[] { table[0], table[1] };
             }
 
             FanSafetyPolicy policy = this.Guard != null ? this.Guard.Policy : new FanSafetyPolicy();
-            byte max = (byte) Math.Max(1, Math.Min(100, Config.FanLevelMax));
-            byte[] level = new byte[2];
-            for(int i = 0; i < 2; i++)
-                level[i] = table[i] > 0 ? table[i] : Math.Max(max, policy.ManualMinimum(i, null));
-            return level;
+            return PanicLevel.Choose(table, Config.FanLevelMax, policy);
 
         }
 
