@@ -21,16 +21,13 @@ GitHub issues, discussions, or pull requests.**
 
 ### How to report privately
 
-You have two options:
+This is the policy of the sporqist fork. For an issue in this fork's own code, use this
+repository's ["Report a vulnerability"](https://github.com/sporqist/OmenMon-Reborn/security/advisories/new)
+button under the Security tab. This creates a private channel with the maintainer that GitHub can
+later convert into a published advisory once a fix is out.
 
-1. **GitHub private advisory** (preferred): use the repository's
-   ["Report a vulnerability"](https://github.com/seakyy/OmenMon-Reborn/security/advisories/new)
-   button under the Security tab. This creates a private channel between
-   you and the maintainer that GitHub can later convert into a published
-   advisory once a fix is out.
-2. **Discord**: DM **`vsun`** (`835146076016607323`). Please include the
-   word "security" in your first message so it's not lost in the general
-   support flow.
+For an issue that also affects upstream OmenMon-Reborn, please report it to seakyy as well, through
+[upstream's advisory form](https://github.com/seakyy/OmenMon-Reborn/security/advisories/new).
 
 ### What to include in your report
 
@@ -71,6 +68,9 @@ Things that are **not** security issues for this project:
   file those as regular bug reports.
 
 ## Windows Defender false positives
+
+_The Microsoft and VirusTotal records below are seakyy's, for upstream's release builds. This fork
+has no binary releases yet._
 
 OmenMon-Reborn is a hardware-control utility that talks to the Embedded
 Controller through the Microsoft-signed [PawnIO](https://pawnio.eu/)

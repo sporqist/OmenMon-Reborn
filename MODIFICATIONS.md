@@ -106,3 +106,24 @@ Patch release addressing the cluster of issues (#32 / #56 / #57 / #58 / #59) tha
 * `wiki/Home.md`: Bumped current-release line to v1.4.1-reborn and added the Battery-Glitch Guard wiki entry.
 * `All/Version.cs`: 1.4.0 → 1.4.1; `AssemblyInformationalVersion` "1.4.1-reborn".
 * `CHANGELOG.md`: Added 1.4.1-reborn block with issue references for #32 / #56 / #57 / #58 / #59, plus a "Deferred" section for #37 (8BCD — conflicting reports across two users on the same ProductId; cannot ship a native entry without disambiguating data from a sustained-load probe).
+
+---
+
+## sporqist fork (Marius Alwan Meyer), October 2026
+
+**Modified Work:** the sporqist fork of OmenMon-Reborn (Fork additions © 2026 Marius Alwan Meyer (sporqist)), https://github.com/sporqist/OmenMon-Reborn
+**Date of modifications:** 2026-10-16 to 2026-10-21, on top of OmenMon-Reborn v1.5.0 (seakyy/OmenMon-Reborn master 5a2636e).
+
+Every file this fork created or changed carries the line `// Fork additions © 2026 Marius Alwan Meyer (sporqist)` in its header (`#` in scripts and workflows). seakyy's and Piotr Szczepański's lines stay unchanged. The complete history is in the git log of this repository.
+
+### What was changed
+* **BIOS fan control on 8BAC:** fan levels are armed with the fan-count query, kept alive by a heartbeat and handed back to the BIOS by staying silent (`Hardware/BiosCtl.cs`, `Hardware/FanArray.cs`, `Hardware/FanHandBack.cs`, `Hardware/Fan.cs`, `Hardware/Platform.cs`, `App/Gui/GuiMonitor.cs`, `App/Gui/GuiTray.cs`).
+* **Fan safety:** floor, warm curve, time limit for low manual levels, level-based thermal panic, sensor validity ("unknown counts as hot") (`Hardware/FanSafetyGuard.cs`, `Hardware/ThermalPanicPolicy.cs`, `Hardware/FanProgram.cs`, `Hardware/PlatformComponent.cs`, `App/Gui/GuiOp.cs`, `App/Cli/CliOpBios.cs`, `App/Cli/CliOpCalibration.cs`).
+* **Graphics mode:** read with the read command; switching locked until it is understood (`Hardware/BiosCtl.cs`, `App/Gui/GuiMenu.cs`, `App/Cli/CliOp.cs`).
+* **Eco+ and the Power & Efficiency window** (`Library/EcoPlus.cs`, `Library/EcoPlusWindows.cs`, `Library/PowerInfo.cs`, `App/Gui/GuiFormPower.cs`, `App/Cli/CliOpEcoPlus.cs`, `External/PowrProf.cs`, `External/Nvml.cs`).
+* **Graphics apps:** per-app GPU preferences with profiles and an unelevated restart of changed apps (`Library/Graphics*.cs`, `App/Gui/GuiFormGraphics*.cs`, `App/Gui/GuiGraphicsDialogs.cs`, `App/Cli/CliOpGraphics.cs`, `External/UserEnv.cs`, `External/AdvApi.cs`, `External/User.cs`, `External/Kernel.cs`).
+* **CLI:** `-Exit` (`Library/ExitSignal.cs`, `App/Cli/CliOpExit.cs`) and `-GpuLog` (`Library/GpuLog.cs`, `App/Cli/CliOpGpuLog.cs`, `External/GpuCounters.cs`, `External/CfgMgr.cs`).
+* **Configuration:** the save updates the user's `OmenMon.xml` instead of regenerating it; load and save failures are reported (`Library/Config.cs`, `Library/ConfigData.cs`, `Library/StateFile.cs`, `Library/LocaleData.cs`).
+* **Build and tests:** SDK-style project for net48 and net10.0-windows, hardware seams, a simulated 8BAC BIOS and EC, safety vectors and property tests (`OmenMon.csproj`, `OmenMon.resx`, `All/Resources.cs`, `All/Meta.cs`, `Hardware/Bios.cs`, `Hardware/EcRegisters.cs`, `Library/Hw.cs`, `Tests/`, `global.json`, `make.cmd`, `.github/workflows/`).
+* **Installer:** Inno Setup script (`installer/`).
+* Smaller fixes in `App/App.cs`, `App/Cli/Cli.cs`, `App/Crash.cs`, `App/Gui/Gui.cs`, `App/Gui/GuiFormCalibration.cs`, `App/Gui/GuiFormMain.cs`, `Driver/PawnIo.cs`, `Hardware/BiosData.cs`, `Hardware/Ec.cs`, `Hardware/EcDiffScanner.cs`, `Hardware/EcMutex.cs`, `Library/AutoCal.cs`, `Library/FanDataPipeServer.cs`, `Library/Os.cs`, `OmenMon.xml` (8BAC model entry), `INSTRUCTION.md`, `docs/RELEASING.md`; see `CHANGELOG.md` and the git log.

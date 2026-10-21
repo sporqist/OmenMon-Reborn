@@ -2,6 +2,7 @@
 #  //\\   OmenMon: Hardware Monitoring & Control Utility
 # //  \\  Copyright © 2023-2026 Piotr Szczepański & seakyy * License: GPL3
 #     //  https://omenmon.github.io/
+# Fork additions © 2026 Marius Alwan Meyer (sporqist)
 #
 # OmenMon Continuous Integration (CI) Workflow
 # Stage 1: Unit Tests

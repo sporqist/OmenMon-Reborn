@@ -3,6 +3,7 @@
  //  \\  Copyright © 2023-2024 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 // OmenMon-Reborn additions © 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
 using System.IO;

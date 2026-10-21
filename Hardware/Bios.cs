@@ -1,6 +1,7 @@
 ﻿  //\\   OmenMon: Hardware Monitoring & Control Utility
  //  \\  Copyright © 2023 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
 using Microsoft.Management.Infrastructure;

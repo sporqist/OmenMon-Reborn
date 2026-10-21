@@ -1,7 +1,7 @@
   //\\   OmenMon: Hardware Monitoring & Control Utility
- //  \\  Copyright Â© 2023-2024 Piotr SzczepaÅ„ski * License: GPL3
+ //  \\  Copyright © 2023-2024 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
-// OmenMon-Reborn additions Â© 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System.Text;
 using System.Text.Json;

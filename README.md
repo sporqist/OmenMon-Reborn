@@ -1,18 +1,22 @@
-# OmenMon-Reborn
+# OmenMon-Reborn (sporqist fork)
 
 <p align="center">
-  <a href="https://github.com/seakyy/OmenMon-Reborn/releases/latest"><img src="https://img.shields.io/github/v/release/seakyy/OmenMon-Reborn?color=brightgreen&label=Latest%20Release" alt="Latest release"></a>
-  <a href="https://github.com/seakyy/OmenMon-Reborn/releases"><img src="https://img.shields.io/github/downloads/seakyy/OmenMon-Reborn/total?color=blue&label=Downloads" alt="Downloads"></a>
-  <a href="https://github.com/seakyy/OmenMon-Reborn/stargazers"><img src="https://img.shields.io/github/stars/seakyy/OmenMon-Reborn?style=social" alt="Stars"></a>
-  <a href="SECURITY.md#windows-defender-false-positives"><img src="https://img.shields.io/badge/Microsoft%20Defender-Cleared-brightgreen?logo=windows" alt="Microsoft Defender cleared"></a>
-  <a href="https://www.virustotal.com/gui/file/21384a329e082b66bf12255c057e84fc8608a44785231ee58a9f0316bcdcf0d1"><img src="https://img.shields.io/badge/VirusTotal-0%20%2F%2071-brightgreen?logo=virustotal" alt="VirusTotal 0/71"></a>
+  <a href="https://github.com/sponsors/sporqist"><img src="https://img.shields.io/badge/Sponsor-sporqist-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor sporqist on GitHub"></a>
 </p>
 
-<p align="center">
-  <a href="https://buymeacoffee.com/seakyy"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-seakyy-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
-</p>
+> **This is a fork by [Marius Alwan Meyer (sporqist)](https://github.com/sporqist)** of [seakyy/OmenMon-Reborn](https://github.com/seakyy/OmenMon-Reborn), built on and for an HP OMEN 16-wf0xxx (board 8BAC) that runs around the clock.
+>
+> What the fork adds:
+> - **Fan control that works on 8BAC:** BIOS fan levels are armed and kept alive with the fan-count query, and handed back to the BIOS cleanly.
+> - **Fan safety rules:** a minimum level unless the laptop is known to be cool, a warm curve for manual levels, and a level-based thermal panic. Fans are never switched off while warm or while the sensors don't read.
+> - **Eco+** on battery, and **Graphics apps**: per-app GPU preferences with profiles and a safe, unelevated restart of changed apps.
+> - `-Exit`, `-GpuLog`, an Inno Setup installer, and a test project with a simulated 8BAC BIOS.
+>
+> There are no binary releases of this fork yet; build it with `dotnet build OmenMon.sln -c Release` (.NET 10 SDK). Fixes that help every model are offered upstream as pull requests. Model reports and bugs on other laptops belong in [upstream's issues](https://github.com/seakyy/OmenMon-Reborn/issues).
 
-> **Welcome to OmenMon-Reborn** — an active fork by **[seakyy](https://github.com/seakyy)**, last updated May 2026.  
+## About OmenMon-Reborn (upstream)
+
+> **OmenMon-Reborn** is the fork by **[seakyy](https://github.com/seakyy)** that this one is based on.  
 > The original OmenMon hardcoded the EC hardware layout for 2023 devices, causing severe issues (fans stuck at 100%, wrong temperatures) on newer and older HP Omen and Victus laptops.  
 >
 > **OmenMon-Reborn** fixes this with a dynamic, XML-driven model database and a safe **Heuristic Auto-Detector**. If your laptop is unknown, it scans the hardware read-only and configures itself — no coding required.
@@ -45,13 +49,20 @@ Most features are specific to _HP_ devices with a compatible BIOS interface expo
 ## License
 
 **OmenMon** Copyright © 2023-2024 [Piotr Szczepański](https://piotr.szczepanski.name/)  
-**OmenMon-Reborn** modifications Copyright © 2026 [seakyy](https://github.com/seakyy)
+**OmenMon-Reborn** modifications Copyright © 2026 [seakyy](https://github.com/seakyy)  
+**This fork's** modifications Copyright © 2026 [Marius Alwan Meyer (sporqist)](https://github.com/sporqist) (listed in [MODIFICATIONS.md](MODIFICATIONS.md))
 
 This application is _free software_: you can redistribute it and/or modify it under the terms of the [GNU General Public License Version 3](https://www.gnu.org/licenses/gpl-3.0.html#license-text) as published by the [Free Software Foundation](https://www.fsf.org/). The full text of the license is available as `LICENSE.md` in this repository or on the [Web page](https://omenmon.github.io/more#license).
 
 **OmenMon** builds upon the work of several other projects. Please see the [acknowledgements](https://omenmon.github.io/more#acknowledgements) for details.
 
 _This software is not affiliated with or endorsed by HP. Any brand names are used for informational purposes only._
+
+## Credits
+
+* **[OmenMon](https://github.com/OmenMon/OmenMon)** by **[Piotr Szczepański](https://piotr.szczepanski.name/)**: the original application, its EC and BIOS groundwork, the GUI and the command-line mode.
+* **[OmenMon-Reborn](https://github.com/seakyy/OmenMon-Reborn)** by **[seakyy](https://github.com/seakyy)**: the model database, the auto-detector, the calibration wizard, the PawnIO port and much more. If this fork is useful to you, consider supporting upstream too: [Buy seakyy a coffee](https://buymeacoffee.com/seakyy).
+* **This fork** by **[Marius Alwan Meyer (sporqist)](https://github.com/sporqist)**: [GitHub Sponsors](https://github.com/sponsors/sporqist).
 
 ## Related Projects
 
