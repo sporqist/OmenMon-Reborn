@@ -387,6 +387,24 @@ namespace OmenMon.Core {
             return level;
         }
 
+        // Filter(), HandBackLevel() and Supervise() as a SafeLevel, the type only the core
+        // can construct: for code that writes the level, so that what it writes is known
+        // to have passed the rules
+        public SafeLevel Allow(byte[] level, FanLevelSource source = FanLevelSource.Manual) {
+            return new SafeLevel(Filter(level, source));
+        }
+
+        public SafeLevel AllowHandBack() {
+            return new SafeLevel(HandBackLevel());
+        }
+
+        // False (and no level) if nothing needs writing
+        public bool TrySupervise(out SafeLevel level) {
+            byte[] next = Supervise();
+            level = next != null ? new SafeLevel(next) : default(SafeLevel);
+            return next != null;
+        }
+
         // Records that control was handed back to the BIOS
         public void RecordRelease() {
             this.released = true;

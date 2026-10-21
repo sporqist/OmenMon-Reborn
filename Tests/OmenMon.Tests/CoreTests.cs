@@ -109,6 +109,75 @@ namespace OmenMon.Tests {
             Assert.False(safe);
         }
 
+        // SafeLevel: only the core can make one, so a SafeLevel is a level the rules decided on
+        [Fact]
+        public void SafeLevel_HasNoPublicConstructor() {
+            Assert.Empty(typeof(SafeLevel).GetConstructors());
+        }
+
+        // default(SafeLevel) is not 0/0 (fans off): reading it throws
+        [Fact]
+        public void SafeLevel_Default_IsNotALevel() {
+            SafeLevel level = default;
+            Assert.False(level.IsValid);
+            Assert.Throws<InvalidOperationException>(() => level.Cpu);
+            Assert.Throws<InvalidOperationException>(() => level.Gpu);
+            Assert.Throws<InvalidOperationException>(() => level.ToArray());
+            Assert.Equal("none", level.ToString());
+        }
+
+        // The guard's SafeLevels are exactly its byte[] results
+        [Theory]
+        [InlineData(40, 0, 0)]      // cool: Fan Off allowed
+        [InlineData(55, 0, 0)]      // warm: the floor
+        [InlineData(65, 0, 0)]      // warm curve 60 °C step
+        [InlineData(65, 50, 255)]   // one fan "no change"
+        [InlineData(85, 70, 70)]    // above the curve already
+        public void Guard_Allow_IsFilter(int cpuC, byte cpuLevel, byte gpuLevel) {
+            DateTime now = new DateTime(2026, 10, 21, 12, 0, 0, DateTimeKind.Utc);
+            SensorReading cpu = new SensorReading(cpuC, now);
+            var guard = new FanSafetyGuard(new FanSafetyPolicy(), () => cpu, () => GpuReading.None, () => now);
+            byte[] request = new byte[] { cpuLevel, gpuLevel };
+            foreach(FanLevelSource source in new[] { FanLevelSource.Manual, FanLevelSource.Program }) {
+                SafeLevel safe = guard.Allow(request, source);
+                Assert.True(safe.IsValid);
+                Assert.Equal(guard.Filter(request, source), safe.ToArray());
+                Assert.Equal(safe.ToArray()[0], safe.Cpu);
+                Assert.Equal(safe.ToArray()[1], safe.Gpu);
+            }
+            guard.RecordWrite(request, guard.Filter(request));
+            Assert.Equal(guard.HandBackLevel(), guard.AllowHandBack().ToArray());
+        }
+
+        [Fact]
+        public void Guard_TrySupervise_IsSupervise() {
+            DateTime now = new DateTime(2026, 10, 21, 12, 0, 0, DateTimeKind.Utc);
+            SensorReading cpu = new SensorReading(40, now);
+            var guard = new FanSafetyGuard(new FanSafetyPolicy(), () => cpu, () => GpuReading.None, () => now);
+
+            // Nothing written: nothing to supervise
+            Assert.False(guard.TrySupervise(out SafeLevel none));
+            Assert.False(none.IsValid);
+
+            // Fan Off while cool, then the system warms up: raised to the floor
+            guard.RecordWrite(new byte[] { 0, 0 }, guard.Filter(new byte[] { 0, 0 }));
+            cpu = new SensorReading(55, now);
+            Assert.True(guard.TrySupervise(out SafeLevel raised));
+            Assert.Equal(guard.Supervise(), raised.ToArray());
+            Assert.Equal(new byte[] { 20, 22 }, raised.ToArray());
+        }
+
+        [Fact]
+        public void SafeLevel_Equality() {
+            DateTime now = new DateTime(2026, 10, 21, 12, 0, 0, DateTimeKind.Utc);
+            var guard = new FanSafetyGuard(new FanSafetyPolicy(), () => new SensorReading(55, now), () => GpuReading.None, () => now);
+            SafeLevel a = guard.Allow(new byte[] { 30, 33 });
+            Assert.Equal(a, guard.Allow(new byte[] { 30, 33 }));
+            Assert.NotEqual(a, guard.Allow(new byte[] { 30, 34 }));
+            Assert.NotEqual(a, default(SafeLevel));
+            Assert.Equal("30/33", a.ToString());
+        }
+
         // The result is a new array: changing it never changes the table
         [Fact]
         public void Curve_ReturnsACopy() {
