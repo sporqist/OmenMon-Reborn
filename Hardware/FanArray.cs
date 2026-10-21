@@ -185,9 +185,15 @@ namespace OmenMon.Hardware.Platform {
                 return;
             }
 
-            byte[] actual = this.Guard != null ? this.Guard.Filter(levels, source) : levels;
+            // Without a guard (legacy) the level is written as asked
+            if(this.Guard == null) {
+                WriteLevels(levels);
+                return;
+            }
+
+            SafeLevel actual = this.Guard.Allow(levels, source);
             WriteLevels(actual);
-            this.Guard?.RecordWrite(levels, actual, source);
+            this.Guard.RecordWrite(levels, actual.ToArray(), source);
 
         }
 
@@ -202,7 +208,7 @@ namespace OmenMon.Hardware.Platform {
 
             if(this.Guard.HoldsLevel) {
                 ArmFanLevel(true);
-                WriteLevels(this.Guard.HandBackLevel());
+                WriteLevels(this.Guard.AllowHandBack());
             }
             this.Guard.RecordRelease();
 
@@ -220,15 +226,14 @@ namespace OmenMon.Hardware.Platform {
             if(this.Guard == null)
                 return false;
 
-            byte[] level = this.Guard.Supervise();
-            if(level == null)
+            if(!this.Guard.TrySupervise(out SafeLevel level))
                 return false;
 
             ArmFanLevel(false);
             if(Config.FanLevelUseEc && this.GetOff())
                 this.Switch.SetValue((int) PlatformData.FanSwitch.On);
             WriteLevels(level);
-            this.Guard.RecordSupervisedWrite(level);
+            this.Guard.RecordSupervisedWrite(level.ToArray());
             return true;
 
         }
@@ -322,7 +327,12 @@ namespace OmenMon.Hardware.Platform {
             } catch { }
         }
 
-        // Writes fan levels without any checks
+        // Writes a level the fan-safety guard decided on (every write while there is a guard)
+        private void WriteLevels(SafeLevel level) {
+            WriteLevels(level.ToArray());
+        }
+
+        // Writes fan levels without any checks (directly only without a guard, legacy)
         private void WriteLevels(byte[] levels) {
 
             // Set manual fan mode, if needed
@@ -401,15 +411,15 @@ namespace OmenMon.Hardware.Platform {
         public void SetOff(bool flag) {
             if(flag && this.Guard != null) {
                 byte[] off = new byte[] { 0, 0 };
-                byte[] actual = this.Guard.Filter(off);
-                if(actual[0] != 0 || actual[1] != 0) {
+                SafeLevel actual = this.Guard.Allow(off);
+                if(actual.Cpu != 0 || actual.Gpu != 0) {
                     if(Config.FanLevelUseEc && this.GetOff())
                         this.Switch.SetValue((int) PlatformData.FanSwitch.On);
                     WriteLevels(actual);
-                    this.Guard.RecordWrite(off, actual);
+                    this.Guard.RecordWrite(off, actual.ToArray());
                     return;
                 }
-                this.Guard.RecordWrite(off, actual);
+                this.Guard.RecordWrite(off, actual.ToArray());
             }
             if(flag && !Config.FanLevelUseEc) {
                 try {
