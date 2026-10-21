@@ -87,6 +87,22 @@ namespace OmenMon.Tests {
             Assert.Equal(t.AddSeconds(124), P.LevelExpiresAt(t));
         }
 
+        // Only 0x10 and 0x2E refresh a level; reads do not (hw-suite P2: polled 0x2D and
+        // 0x23 every ~2 s, the level still expired at 124.3 s)
+        [Theory]
+        [InlineData(0x10u, true)]
+        [InlineData(0x2Eu, true)]
+        [InlineData(0x2Du, false)]
+        [InlineData(0x23u, false)]
+        [InlineData(0x2Fu, false)]
+        [InlineData(0x2Cu, false)]
+        [InlineData(0x26u, false)]
+        [InlineData(0x27u, false)]
+        [InlineData(0x1Au, false)]
+        public void Omen8Bac_RefreshesLevel(uint type, bool refreshes) {
+            Assert.Equal(refreshes, P.RefreshesLevel(type));
+        }
+
         [Fact]
         public void Find() {
             Assert.Same(P, BoardProfile.Find("8BAC"));
@@ -116,6 +132,24 @@ namespace OmenMon.Tests {
             fake.Advance(P.ArmWindow + TimeSpan.FromSeconds(1));
             fake.Send(BiosData.Cmd.Default, P.FanLevelType, new byte[] { 50, 50, 0, 0 }, 0, out _);
             Assert.Null(fake.ActiveLevels);
+        }
+
+        // As in hw-suite P2: reads every 2 s during a hold do not keep the level alive
+        [Fact]
+        public void SimulatedBoard_MatchesTheProfile_ReadsDoNotRefresh() {
+            var fake = new Fake8BacBios();
+            var bios = new BiosCtl(fake);
+            bios.SetFanLevelWithoutGuard(new byte[] { 40, 41 });
+            DateTime set = fake.Now;
+            while(fake.Now < P.LevelExpiresAt(set) - TimeSpan.FromSeconds(2)) {
+                fake.Advance(TimeSpan.FromSeconds(2));
+                bios.GetFanLevel();
+                bios.GetTemperature();
+            }
+            Assert.Equal(new byte[] { 40, 41 }, fake.MeasuredLevels);
+            fake.Now = P.LevelExpiresAt(set);
+            Assert.Equal(fake.CurveLevels, fake.MeasuredLevels);
+            Assert.All(fake.Calls.Skip(2), c => Assert.False(P.RefreshesLevel(c.Type)));
         }
 
         [Fact]

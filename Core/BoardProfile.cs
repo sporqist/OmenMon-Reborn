@@ -27,15 +27,16 @@ namespace OmenMon.Core {
 
         // The BIOS WMI command for fan calls (hpqBIntM, signature "SECU") and its types
         public uint Command { get; }
-        public uint FanCountType { get; }  // arms a following fan-level write, keeps a level alive
+        public uint FanCountType { get; }  // arms a following fan-level write, refreshes a level
         public uint FanLevelType { get; }  // sets the fan levels [cpu, gpu], rpm / 100
 
         // A fan-level write only takes effect this long after a fan-count query
         public TimeSpan ArmWindow { get; }
 
-        // A fan level holds this long after the last fan-level write or fan-count query,
-        // then the BIOS curve resumes. There is no release command: releasing is staying
-        // silent for longer than this.
+        // A fan level holds this long after the last fan-level write or fan-count query
+        // (the only calls that refresh it, see RefreshesLevel), then the BIOS curve
+        // resumes. There is no release command: releasing is sending neither for longer
+        // than this.
         public TimeSpan LevelExpiry { get; }
 
         // Whether 0 stops a fan (true on 8BAC: 0/0 is both fans off, not automatic)
@@ -108,6 +109,15 @@ namespace OmenMon.Core {
             return lastFanCount.HasValue && now - lastFanCount.Value <= this.ArmWindow;
         }
 
+        // Whether a call of this type refreshes an active fan level (restarts LevelExpiry):
+        // the fan-count query and the fan-level write only. Reads do not: on 8BAC, hw-suite
+        // P2 polled 0x2D and 0x23 every ~2 s during a hold and the level still expired at
+        // 124.3 s. So neither do the other WMI calls, nor the WMIS bit (EC 0xA3 bit 4) that
+        // every WMI call sets; only 0x10 (EC mailbox 45 A0 00) and 0x2E do.
+        public bool RefreshesLevel(uint type) {
+            return type == this.FanCountType || type == this.FanLevelType;
+        }
+
         // When a level last refreshed (fan-level write or fan-count query) at the given
         // time stops holding
         public DateTime LevelExpiresAt(DateTime lastRefresh) {
@@ -116,7 +126,8 @@ namespace OmenMon.Core {
 
         // HP OMEN 16-wf0xxx (8BAC), BIOS F.30, measured 2026-10-15/16 and 2026-10-21:
         //   * 0x10 arms a following 0x2E for at least 30 s, and keeps an active level alive;
-        //   * a level expires 123-124 s after the last 0x2E or 0x10;
+        //   * a level expires 123-124 s after the last 0x2E or 0x10; reads (0x2D, 0x23) do
+        //     not keep it alive (hw-suite P2, 2026-10-21: expired at 124.3 s while polled);
         //   * 0x2E [0, 0] switches both fans off;
         //   * 255 leaves that fan where it is, 255/255 changes nothing.
         // Writes: 0x2E and 0x10 only (restructuring plan, section 3a.4); others are added one
