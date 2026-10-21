@@ -425,17 +425,18 @@ namespace OmenMon.Hardware.Platform {
 
         // The same, but while the GPU's state is unknown it returns the hottest of what
         // does read with complete = false: the true hottest temperature is at least that
-        // (thermal panic may start on it, never end on it). None if the CPU has no fresh
-        // reading.
+        // (thermal panic may start on it, never end on it). Without a fresh CPU reading it
+        // is incomplete too, and the hottest of the rest still counts: a GPU at 97 °C
+        // must start panic even while the CPU does not read (Marius, 2026-10-21; the
+        // reverse case already did). None only if nothing reads.
         public SensorReading GetHottestReading(bool forceUpdate, out bool complete) {
             if(forceUpdate)
                 UpdateTemperature(false);
             complete = true;
             DateTime now = PlatformClock.UtcNow;
-            SensorReading cpu = GetCpuReading(false);
-            if(!cpu.HasValue)
-                return SensorReading.None;
-            SensorReading hottest = cpu;
+            SensorReading hottest = GetCpuReading(false);
+            if(!hottest.HasValue)
+                complete = false;
             GpuReading gpu = GetGpuReading(false);
             switch(gpu.StateAt(now, ReadingMaxAge)) {
                 case GpuState.Unknown:
