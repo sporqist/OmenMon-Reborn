@@ -4,6 +4,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System.Text.RegularExpressions;
+using OmenMon.Core;
 using OmenMon.Hardware.Platform;
 using OmenMon.Library;
 using OmenMon.Tests.Fakes;

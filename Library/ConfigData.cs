@@ -176,7 +176,7 @@ namespace OmenMon.Library {
         public static int FanLevelMax = 55;
         public static int FanLevelMin = 20;
 
-        // Fan safety (Hardware/FanSafetyGuard.cs): every fan-level write keeps each fan at
+        // Fan safety (Core/FanSafetyGuard.cs): every fan-level write keeps each fan at
         // least at its floor level [rpm / 100] unless a fresh, valid CPU (and GPU, if it
         // reads) temperature is below FanSafetyCoolTemperature [°C]. Even while cool, a
         // manual level below the floor (Fan Off, constant minimum) is raised to the floor
@@ -418,10 +418,8 @@ namespace OmenMon.Library {
         public const int MaxBelievableTemperature = 120;
 
         // How old a temperature reading may be [s] before fan control treats the sensor
-        // as unknown (and thus unsafe). Longer than the fan-program interval (15 s) so a
-        // single failed read does not count, short enough that a sensor which stopped
-        // reading is noticed within a few program ticks.
-        public const int TemperatureMaxAge = 45;
+        // as unknown (and thus unsafe); decided in the core, see FanSafetyPolicy
+        public const int TemperatureMaxAge = OmenMon.Core.FanSafetyPolicy.DefaultReadingMaxAgeSeconds;
 
         // nVidia Display Container service name
         public const string NvDisplayContainerService = "NVDisplay.ContainerLocalSystem";

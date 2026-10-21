@@ -380,7 +380,7 @@ namespace OmenMon.Library {
                         FanOffMaxMinutes = value;
 
                     if(TryGetString(xml, XmlPrefix + "FanSafetyWarmCurve", out string warmCurve)
-                        && OmenMon.Hardware.Platform.SafetyStep.ParseList(warmCurve) != null)
+                        && OmenMon.Core.SafetyStep.ParseList(warmCurve) != null)
                         FanSafetyWarmCurve = warmCurve;
 
                     if(GetBool(xml, XmlPrefix + "FanLevelNeedManual", out flag))

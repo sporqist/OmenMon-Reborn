@@ -4,10 +4,8 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
-using OmenMon.Core;
-using OmenMon.Library;
 
-namespace OmenMon.Hardware.Platform {
+namespace OmenMon.Core {
 
     // Who asked for a fan level. Programs re-evaluate the temperature every tick, so
     // their low levels are not time-limited; everything else (constant speed, Fan Off,
@@ -27,10 +25,16 @@ namespace OmenMon.Hardware.Platform {
         // Below this (fresh, valid CPU reading; GPU too if it reads) the floor is waived [°C]
         public int CoolTemperature = 50;
 
+        // How old a temperature reading may be [s] before fan control treats the sensor
+        // as unknown (and thus unsafe). Longer than the fan-program interval (15 s) so a
+        // single failed read does not count, short enough that a sensor which stopped
+        // reading is noticed within a few program ticks. Config.TemperatureMaxAge.
+        public const int DefaultReadingMaxAgeSeconds = 45;
+
         // How old a temperature reading may be before the fan logic stops trusting it:
         // a stale reading is an unknown temperature, and unknown counts as hot. The one
         // place this is decided; Platform judges its readings by it too.
-        public TimeSpan ReadingMaxAge = TimeSpan.FromSeconds(Config.TemperatureMaxAge);
+        public TimeSpan ReadingMaxAge = TimeSpan.FromSeconds(DefaultReadingMaxAgeSeconds);
 
         // How long a manual level below the floor (Fan Off, constant minimum) may stay
         // in effect even while cool
@@ -72,15 +76,6 @@ namespace OmenMon.Hardware.Platform {
                         min = level;
                 }
             return min;
-        }
-
-        public static FanSafetyPolicy FromConfig() {
-            return new FanSafetyPolicy {
-                FloorCpu = Config.FanSafetyFloorCpu,
-                FloorGpu = Config.FanSafetyFloorGpu,
-                CoolTemperature = Config.FanSafetyCoolTemperature,
-                BelowFloorMaxDuration = TimeSpan.FromMinutes(Config.FanOffMaxMinutes),
-                WarmCurve = SafetyStep.ParseList(Config.FanSafetyWarmCurve) ?? DefaultWarmCurve() };
         }
 
     }
@@ -159,7 +154,7 @@ namespace OmenMon.Hardware.Platform {
 
         private readonly Func<SensorReading> cpuReading;
         private readonly Func<GpuReading> gpuReading;
-        private readonly Func<DateTime> clock;
+        private readonly Func<DateTime> clock;  // UTC
 
         // Last level asked for (before the rules), null if none or handed back
         private byte[] requested;
@@ -178,6 +173,8 @@ namespace OmenMon.Hardware.Platform {
         private DateTime releasedAt;
         private bool released;
 
+        // The clock is required: the core never reads the system clock itself (every
+        // caller passes one; Platform's is PlatformClock)
         public FanSafetyGuard(
             FanSafetyPolicy policy,
             Func<SensorReading> cpuReading,
@@ -187,7 +184,7 @@ namespace OmenMon.Hardware.Platform {
             this.Policy = policy ?? new FanSafetyPolicy();
             this.cpuReading = cpuReading ?? (() => SensorReading.None);
             this.gpuReading = gpuReading ?? (() => GpuReading.None);
-            this.clock = clock ?? (() => DateTime.UtcNow);
+            this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
 
         }
 
