@@ -111,7 +111,9 @@ namespace OmenMon.AppGui {
                 AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false,
                 RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, MultiSelect = true,
                 EditMode = DataGridViewEditMode.EditOnEnter, BackgroundColor = SystemColors.Window,
-                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None };
+                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
+                // The fixed default height clipped the header text (Marius, 2026-10-21)
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize };
             Grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "App", Width = 140, ReadOnly = true });
             DataGridViewComboBoxColumn choice = new DataGridViewComboBoxColumn {
                 HeaderText = "GPU in this profile", Width = 150, FlatStyle = FlatStyle.Flat,
