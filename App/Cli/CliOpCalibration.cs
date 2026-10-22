@@ -47,7 +47,7 @@ namespace OmenMon.AppCli {
             // no RPM gain on both fans relative to the highest prior commanded level
             // seen so far — the board has hit its physical fan ceiling and any next
             // higher step would risk the BIOS rate-limiter freeze documented on
-            // 8C30 / 8D07 / 8BAD / 8E35 / 8C77. Plateau exit is treated as a
+            // 8C30 / 8D07 / 8BAD / 8E35. Plateau exit is treated as a
             // successful run, not a failure: the samples we did collect are still
             // scanned and reported.
             public bool PlateauReached;

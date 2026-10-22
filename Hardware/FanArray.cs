@@ -622,13 +622,13 @@ namespace OmenMon.Hardware.Platform {
         //   8E35 — HP Victus 15 (2026 BIOS)               — issue #57 (ClockworkNirvana,
         //          confirmed via raw EC-dump analysis: 70 % → 100 % shows 0 RPM gain on
         //          GPU and a 16 RPM regression on CPU — the same firmware signature.)
-        //   8C77 — HP Omen 16-wf1012nl                    — issue #50 (stf1o, defensive add).
-        //          Correction (2026-10-22): the evidence was a "PeriodEncoded8 tach" at
-        //          EC[0xD2] going 0xB2 → 0xD0 → 0x99 → 0xEC across 0/30/70/100 %. On the
-        //          8BAC and 8C77 ACPI maps 0xD2/0xD3 is BAC0, the battery current (16-bit;
-        //          0 at full charge on AC), not a fan: those numbers fit a sweep run on
-        //          battery. 8C77 has two fans, and its speed is BIOS 0x2D x 100 (the
-        //          BIOS-only model entry). Kept on the list for now (it costs nothing).
+        //   (8C77 — HP Omen 16 wf1xxx — was here from issue #50 and is removed: its only
+        //          evidence was a "PeriodEncoded8 tach" at EC[0xD2] going 0xB2 → 0xD0 →
+        //          0x99 → 0xEC across 0/30/70/100 %, and on the 8C77 ACPI tables (F.20,
+        //          acpiexec) 0xD2/0xD3 is BAC0, the battery current (16-bit, 0 at full
+        //          charge on AC), not a fan. On the board itself (fan test P8/P9,
+        //          2026-10-21) 0x27 on and off froze nothing: the fans followed 0x10 +
+        //          30/33 again within 5-7 s, and 0x27 [1] ran the table maximum 60/63.)
         //   88F4 — HP Omen (BIOS rate-limiter freeze)     — issue #67
         //   8748 — HP Omen 17-cb1004ur (2020)             — issue #111 (swo1och, AutoCal
         //          plateau at 70 %: CPU RPM flat at 2929 across 30 -> 70 %, the fan-ceiling
@@ -640,7 +640,7 @@ namespace OmenMon.Hardware.Platform {
         //   8A4F — HP Victus 15 (2023)                    — issue #107 (richardcofie). AutoCal
         //          plateau-detector tripped at 30 %: live RPM collapsed to idle (CPU 5109→1585,
         //          GPU 4418→1597) instead of climbing, the physical-ceiling signature. Fan regs
-        //          are PeriodEncoded8 (CPU 0x2E, GPU 0x2F), so — like 8C77 — RPM stays
+        //          are PeriodEncoded8 (CPU 0x2E, GPU 0x2F), so RPM stays
         //          sidecar-only and this list is the protection that applies.
         //
         // Call-sites:
@@ -657,7 +657,6 @@ namespace OmenMon.Hardware.Platform {
                 case "8D07":
                 case "8BAD":
                 case "8E35":
-                case "8C77":
                 case "88F4":
                 case "8748":
                 case "8A50":

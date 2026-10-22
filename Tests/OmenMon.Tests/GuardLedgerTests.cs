@@ -2,6 +2,7 @@
  //  \\  Copyright © 2023 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 // OmenMon-Reborn additions © 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System.Text.RegularExpressions;
 
@@ -34,14 +35,14 @@ namespace OmenMon.Tests {
 
         // Boards confirmed to hit the BIOS rate-limiter EC freeze at 100 % fan
         // (lock-until-reboot). Removing one re-exposes its users to the freeze:
-        // 8C30 #32, 8D07 #56, 8BAD #58, 8E35 #57, 8C77 #50, 88F4 #67, 8748 #111,
-        // 8A50 #115.
+        // 8C30 #32, 8D07 #56, 8BAD #58, 8E35 #57, 88F4 #67, 8748 #111, 8A50 #115.
+        // (8C77, from #50, was removed on 2026-10-22: its evidence was EC 0xD2, which is
+        // the battery current BAC0, and 0x27 on/off froze nothing on the board.)
         [Theory]
         [InlineData("8C30")]
         [InlineData("8D07")]
         [InlineData("8BAD")]
         [InlineData("8E35")]
-        [InlineData("8C77")]
         [InlineData("88F4")]
         [InlineData("8748")]
         [InlineData("8A50")]

@@ -57,6 +57,15 @@ namespace OmenMon.Tests {
             Assert.Null(outcome.Markdown);
         }
 
+        // 8C77 is off the max-fan-freeze list (its evidence was the battery current at
+        // 0xD2; 0x27 on/off froze nothing on the board); the boards with real reports stay
+        [Fact]
+        public void MaxFanFreezeList_Without8C77() {
+            Assert.False(FanArray.HasMaxFanFreeze("8C77"));
+            Assert.True(FanArray.HasMaxFanFreeze("8C30"));
+            Assert.True(FanArray.HasMaxFanFreeze("8E35"));
+        }
+
         // W1 without a fan array (the CLI path) and on a board without an entry
         [Fact]
         public void CalibrationRefusal_ModelKinds() {
