@@ -680,6 +680,17 @@ namespace OmenMon.Library {
                 GpuReg = 0, GpuMode = EcDiffScanner.Mode.BiosLevelMirror, GpuMul = 100,
             },
 
+            // HP OMEN 16 (8C77, 2024, wf1xxx, BIOS F.20). The BIOS-reported fan level (0x2D) is the
+            // measured speed of each fan in units of 100 RPM: it ramps through intermediate values,
+            // and its CPU byte equals EC[0x11] (FRPM, the fan-1 speed). There is no tachometer
+            // anywhere else; EC[0xD2] (issue #50) is BAC0, the battery current. The model entry
+            // is BIOS-only, which reads the speed the same way; this entry covers the AutoCal
+            // paths (report, collision check).
+            ["8C77"] = new Mapping {
+                CpuReg = 0, CpuMode = EcDiffScanner.Mode.BiosLevelMirror, CpuMul = 100,
+                GpuReg = 0, GpuMode = EcDiffScanner.Mode.BiosLevelMirror, GpuMul = 100,
+            },
+
             // HP Victus 15-fb2xxx (8C2F, 2024) — issue #174, #186, reported by @Vomitted / @alifkrisnowo064.
             // Canonical 16-bit LE tachometers at 0xB0 / 0xB2.
             ["8C2F"] = new Mapping {

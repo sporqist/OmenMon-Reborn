@@ -479,6 +479,31 @@
                 <ModeReg>89</ModeReg>
                 <SwitchReg>244</SwitchReg>
             </Model>
+            <!-- 8C77: HP OMEN 16 (2024, wf1xxx), BIOS F.20. BIOS fan control only: no EC fan register is read or written.
+                 Measured on the board (2026-10-21/22, fan test, ear test, ACPI tables via acpiexec, cross-checked live):
+                 * Fans: two. BIOS 0x2E [cpu, gpu] in rpm/100: byte 0 = left (CPU) fan, byte 1 = right (GPU) fan;
+                   255 leaves that fan where it is; 0/0 switches both fans OFF. A level holds about 124 s after the
+                   last 0x2E or 0x10, then the BIOS curve takes over; 0x10 alone keeps it alive. 0x27 [1] runs the
+                   fan table maximum (60/63) while a level is armed. No freeze seen with 0x27 on/off.
+                 * Speed: BIOS 0x2D x 100 for both fans, a measured speed: it ramps through intermediate values, and
+                   its CPU byte equals EC 0x11 (FRPM, fan-1 speed in 100 rpm). There is no tachometer elsewhere.
+                 * Temperatures: CPU EC 0xB2 (EST3) = BIOS 0x23[1]. GPU EC 0xB4 (SKTC): tracks NVML best under an
+                   80 W GPU load (r 1.00, about 2.9 C above it), reads 0 while the dGPU is parked, and EC reads do
+                   not wake it. EC 0xB3 (SKTB, = 0x23[2]) lags 0xB4 by 3-5 C under load; EC 0xB7 (EST2, = 0x23[0]/[3])
+                   is a board sensor, not the GPU (r 0.83): never use it (or the global GPTM) for the GPU.
+                 * Why not the EC fan registers: the default layout's registers are other data here. 0x2C PRIC and
+                   0x2D-0x3C BCTL (a 16-byte battery string) hold the rate registers 0x2C-0x2F, 0x3A/0x3B and the
+                   2022 level registers 0x34/0x35; 0x62 SMAD and 0x63 SMCM are the EC's SMBus host address and
+                   command (0x16 = the battery, 0x0B shifted left; 0x20 = SBS ManufacturerName), with the SMBus data
+                   block from 0x64 (the battery manufacturer name); 0x90-0x98 BMNN is the battery name (ModeReg 0x95
+                   reads 0x44); the speed words 0xB0/0xB2 are temperatures (CTMP, EST3); 0xF4 has no field.
+                   0x57 is the keyboard colour (Z04B), 0x58 battery flag bits, 0x59 OGHM (the thermal policy byte).
+                   0xD2/0xD3 is BAC0, the battery current, not a fan (issue #50's "tach at 0xD2"). -->
+            <Model ProductId="8C77" DisplayName="HP Omen 16 (2024, wf1xxx, 8C77)">
+                <FanControl>Bios</FanControl>
+                <TempCpuReg>178</TempCpuReg>
+                <TempGpuReg>180</TempGpuReg>
+            </Model>
             <!-- 8A25: HP Victus 16-d1xxx (2022, 12th gen Intel) — GetMaxFan=True sets 0xFF at 0x34/0x35; rate regs confirmed at 0x2E/0x2F; Fan2=Unsupported -->
             <Model ProductId="8A25" DisplayName="HP Victus 16 (2022, d1xxx)">
                 <FanLevelReg0>52</FanLevelReg0>

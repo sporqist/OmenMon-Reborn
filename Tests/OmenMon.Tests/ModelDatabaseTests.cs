@@ -2,6 +2,7 @@
  //  \\  Copyright © 2023-2024 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 // OmenMon-Reborn additions © 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
 using System.Collections.Generic;
@@ -36,6 +37,12 @@ namespace OmenMon.Tests {
             "TempCpuReg",
             "TempGpuReg"
         };
+
+        // A BIOS-only model (<FanControl>Bios</FanControl>) has none of the register
+        // elements: it never uses an EC fan register
+        private static bool IsBiosOnly(XElement model) {
+            return ((string?) model.Element("FanControl"))?.Trim() == "Bios";
+        }
 
         private static readonly Lazy<XDocument> Config = new(() =>
             XDocument.Load(GetConfigPath(), LoadOptions.SetLineInfo));
@@ -93,8 +100,17 @@ namespace OmenMon.Tests {
             if(string.IsNullOrWhiteSpace(displayName))
                 errors.Add($"[{tag}] Missing or empty DisplayName attribute.");
 
+            var fanControl = model.Element("FanControl");
+            if(fanControl is not null && fanControl.Value.Trim() != "Bios" && fanControl.Value.Trim() != "Ec")
+                errors.Add($"[{tag}] <FanControl> is '{fanControl.Value}', expected Bios or Ec.");
+
             foreach(var elementName in RequiredRegisterElements) {
                 var node = model.Element(elementName);
+                if(IsBiosOnly(model)) {
+                    if(node is not null)
+                        errors.Add($"[{tag}] BIOS-only model has an EC fan register <{elementName}>.");
+                    continue;
+                }
                 if(node is null) {
                     errors.Add($"[{tag}] Missing required <{elementName}> element.");
                     continue;
@@ -136,7 +152,7 @@ namespace OmenMon.Tests {
         public void KnownModels_RequiredFieldShapeIsConsistent() {
             var errors = new List<string>();
 
-            foreach(var model in GetModels()) {
+            foreach(var model in GetModels().Where(m => !IsBiosOnly(m))) {
                 foreach(var elementName in RequiredRegisterElements) {
                     if(model.Elements(elementName).Count() != 1)
                         errors.Add($"[{ModelTag(model)}] Expected exactly one <{elementName}> element.");

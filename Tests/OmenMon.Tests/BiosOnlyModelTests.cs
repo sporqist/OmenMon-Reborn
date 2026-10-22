@@ -175,6 +175,29 @@ namespace OmenMon.Tests {
             Assert.Contains("<FanLevelReg1>0xZZ</FanLevelReg1>", text);
         }
 
+        // The shipped OmenMon.xml, loaded as the application loads it
+        internal static string ShippedConfig() {
+            string root = AppContext.BaseDirectory;
+            while(!File.Exists(Path.Combine(root, "OmenMon.xml")))
+                root = Path.GetDirectoryName(root)!;
+            return Path.Combine(root, "OmenMon.xml");
+        }
+
+        // Every shipped model loads (none dropped), and 8C77 is BIOS-only with its CPU and
+        // GPU registers (0xB2, 0xB4)
+        [Fact]
+        public void ShippedModels_LoadWithoutProblems_8C77IsBiosOnly() {
+            File.Copy(ShippedConfig(), File_, true);
+            Config.Load();
+            Assert.False(Config.LoadFailed);
+            Assert.Empty(Config.ModelLoadProblems);
+            PlatformPreset p = Config.Models["8C77"];
+            Assert.Equal(FanControlKind.Bios, p.FanControl);
+            Assert.Equal(0xB2, p.TempCpuReg);
+            Assert.Equal(0xB4, p.TempGpuReg);
+            Assert.True(AutoCal.IsKnownBoard("8C77"));
+        }
+
         // T4: what the unknown-model prompt saves (Config.SaveModel of the detector's
         // result) has no control register, and loads back as a BIOS-only model
         [Fact]
