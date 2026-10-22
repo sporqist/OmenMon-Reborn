@@ -144,7 +144,8 @@ namespace OmenMon.Hardware.Platform {
         // Builds the fan array for a model: over the given EC registers and BIOS (the live
         // ones unless a test substitutes them). An EC model gets its registers as before;
         // a BIOS-only model gets none of them (AbsentComponent), its speed is the BIOS
-        // level x 100 and its fan array never reads or writes an EC fan register.
+        // speed BIOS 0x2D reports (100 rpm units) and its fan array never reads or writes an
+        // EC fan register.
         internal static FanArray CreateFanArray(PlatformPreset preset, IEcRegisters registers = null, IBiosCtl bios = null) {
 
             const PlatformData.AccessType R = PlatformData.AccessType.Read;
@@ -228,24 +229,50 @@ namespace OmenMon.Hardware.Platform {
 
         // Initializes the temperature controls
         private void InitTemperature() {
+            this.Temperature = CreateTemperatures(this.Preset, out bool[] use);
+            this.TemperatureUse = use;
+        }
+
+        // Builds the temperature sensors for a model, over the given EC registers and
+        // BIOS (the live ones unless a test substitutes them); use says which count for
+        // the maximum temperature. A BIOS-only model gets BIOS 0x23 and the EC registers
+        // it names, nothing else (BiosFanControl.Sensors); an EC model gets the
+        // configured <Temperature> sensors with its overrides, as before.
+        internal static IPlatformReadComponent[] CreateTemperatures(PlatformPreset preset, out bool[] use,
+            IEcRegisters registers = null, IBiosCtl bios = null) {
+
+            if(preset.IsBiosOnly) {
+                TemperatureSensorPlan[] plan = BiosFanControl.Sensors(preset.TempCpuReg, preset.TempGpuReg);
+                IPlatformReadComponent[] sensors = new IPlatformReadComponent[plan.Length];
+                use = new bool[plan.Length];
+                for(int k = 0; k < plan.Length; k++) {
+                    use[k] = true;
+                    if(plan[k].Source == TemperatureSource.Ec) {
+                        EcComponent comp = new EcTemperatureComponent(plan[k].Register, Config.MaxBelievableTemperature, registers);
+                        comp.SetName(plan[k].Name);
+                        sensors[k] = comp;
+                    } else
+                        sensors[k] = new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, bios);
+                }
+                return sensors;
+            }
 
             // Per-model temperature-register overrides come from the preset resolved in
             // the ctor. 2024+ boards that moved CPU/GPU temp sensors to non-legacy EC
             // offsets (e.g. 8C9C: CPU at EC[0xB0], GPU at EC[0xB4]) declare TempCpuReg /
             // TempGpuReg there; for everyone else the values are 0 and we fall through
             // to the global <Temperature> config.
-            PlatformPreset preset = this.Preset;
 
             // Set up the temperature sensor array based on the configuration data
-            this.Temperature = new IPlatformReadComponent[Config.TemperatureSensor.Count];
-            this.TemperatureUse = new bool[Config.TemperatureSensor.Count];
+            IPlatformReadComponent[] temperature = new IPlatformReadComponent[Config.TemperatureSensor.Count];
+            use = new bool[Config.TemperatureSensor.Count];
 
             // Populate the temperature sensor array
             int i = 0;
             foreach(string name in Config.TemperatureSensor.Keys) {
 
                 // Set whether the sensor can be used for maximum temperature
-                this.TemperatureUse[i] = Config.TemperatureSensor[name].Use;
+                use[i] = Config.TemperatureSensor[name].Use;
 
                 // Process each sensor loaded from the configuration
                 switch(Config.TemperatureSensor[name].Source) {
@@ -268,23 +295,26 @@ namespace OmenMon.Hardware.Platform {
                         }
                         EcComponent comp = new EcTemperatureComponent(
                             register,
-                            Config.MaxBelievableTemperature);
+                            Config.MaxBelievableTemperature,
+                            registers);
                         if(overridden)
                             comp.SetName(name); // preserve "CPUT" / "GPTM" instead of the
                                                 // auto-derived enum name (e.g. "RPM1")
-                        this.Temperature[i++] = comp;
+                        temperature[i++] = comp;
                         break;
                     }
 
                     // Add a WMI BIOS sensor
                     case PlatformData.LinkType.WmiBios:
-                        this.Temperature[i++] =
-                            new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature);
+                        temperature[i++] =
+                            new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, bios);
                         break;
 
                 }
 
             }
+
+            return temperature;
 
         }
 #endregion
@@ -396,9 +426,12 @@ namespace OmenMon.Hardware.Platform {
         // The EC register of the GPU temperature (GPTM) for a product, resolved as in
         // InitTemperature(): the model's TempGpuReg override, else the configured GPTM
         // sensor if it reads the EC; 0 if there is none
+        // (a BIOS-only model: its TempGpuReg or none, never the global GPTM)
         public static byte GpuTemperatureRegister(string product) {
             if(product != null && Config.Models.ContainsKey(product) && Config.Models[product].TempGpuReg != 0)
                 return Config.Models[product].TempGpuReg;
+            if(product != null && Config.Models.ContainsKey(product) && Config.Models[product].IsBiosOnly)
+                return 0;
             if(Config.TemperatureSensor.ContainsKey("GPTM")
                 && Config.TemperatureSensor["GPTM"].Source == PlatformData.LinkType.EmbeddedController)
                 return Config.TemperatureSensor["GPTM"].Register;

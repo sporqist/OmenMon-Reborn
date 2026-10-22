@@ -25,7 +25,8 @@ namespace OmenMon.Tests.Fakes {
     // fanArrayBios, the fan array calls the BIOS through what it returns for BiosCtl
     // (a recorder in SafeLevelBoundaryTests); everything else uses BiosCtl directly.
     // With preset, the fan array is the one production builds for that model
-    // (Platform.CreateFanArray, e.g. a BIOS-only model) and the platform carries it.
+    // (Platform.CreateFanArray, e.g. a BIOS-only model) and the platform carries it;
+    // a BIOS-only model also gets its production sensors (Platform.CreateTemperatures).
     public sealed class TestRig : IDisposable {
 
         public Fake8BacBios Bios { get; } = new Fake8BacBios();
@@ -102,10 +103,13 @@ namespace OmenMon.Tests.Fakes {
             gptm.SetName("GPTM");
             WmiBiosTemperatureComponent bios = new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, this.BiosCtl);
 
-            this.Platform = new Platform(this.Settings, this.Fans,
-                new IPlatformReadComponent[] { cput, gptm, bios },
-                new bool[] { true, true, false },
-                preset);
+            // A BIOS-only model gets the sensors production builds for it
+            IPlatformReadComponent[] temperature = new IPlatformReadComponent[] { cput, gptm, bios };
+            bool[] use = new bool[] { true, true, false };
+            if(preset != null && preset.IsBiosOnly)
+                temperature = Platform.CreateTemperatures(preset, out use, sensors, this.BiosCtl);
+
+            this.Platform = new Platform(this.Settings, this.Fans, temperature, use, preset);
 
         }
 

@@ -261,7 +261,7 @@ namespace OmenMon.Tests {
             Assert.Contains(rig.Ec.Writes, w => w.Register == 0xF4);
         }
 
-        // On a BIOS-only model the speed is the BIOS level x 100, the rate, the mode and
+        // On a BIOS-only model the speed is BIOS 0x2D x 100, the rate, the mode and
         // the manual/switch registers are unknown or come from the guard
         [Fact]
         public void BiosOnly_ReadsComeFromTheBiosAndTheGuard() {

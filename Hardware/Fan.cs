@@ -49,9 +49,11 @@ namespace OmenMon.Hardware.Platform {
         private readonly IBiosCtl bios;
         protected IBiosCtl Bios { get { return this.bios ?? Hw.Bios; } }
 
-        // BIOS-only model: the speed is the 0x2D level x 100, whatever an AutoCal sidecar
-        // or the EC says (a calibration on such a board pinned temperature bytes as RPM)
-        private readonly bool levelMirror;
+        // BIOS-only model: the speed is what BIOS 0x2D reports, in 100 rpm units (a
+        // measured speed: on 8C77 it ramps through intermediate values and equals EC 0x11
+        // FRPM, the fan-1 speed), whatever an AutoCal sidecar or the EC says (a
+        // calibration on such a board pinned temperature bytes as RPM)
+        private readonly bool speedFromBios;
 
         // Constructs a fan instance
         public Fan(
@@ -61,10 +63,10 @@ namespace OmenMon.Hardware.Platform {
             IPlatformWriteComponent rateWrite,
             IPlatformReadComponent speed,
             IBiosCtl bios = null,
-            bool levelMirror = false) {
+            bool speedFromBios = false) {
 
             this.bios = bios;
-            this.levelMirror = levelMirror;
+            this.speedFromBios = speedFromBios;
             this.FanType = type;
             this.Level = level;
             this.RateRead = rateRead;
@@ -101,7 +103,7 @@ namespace OmenMon.Hardware.Platform {
         // override is wrong the user will see it immediately and can recalibrate, which
         // is far less confusing than a silent flip-flop between the two readings.
         public virtual int GetSpeed() {
-            if(this.levelMirror)
+            if(this.speedFromBios)
                 return BiosFanControl.Rpm(GetLevel());
 
             // Pull (offset, mode, multiplier) as a single atomic snapshot — see AutoCal for why.

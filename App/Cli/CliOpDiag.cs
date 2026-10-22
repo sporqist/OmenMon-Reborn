@@ -234,7 +234,7 @@ namespace OmenMon.AppCli {
                 var platform = new Platform();
                 var fans = platform.Fans;
 
-                sb.AppendLine($"- Fan control: `{fans.Control}`" + (fans.Control == OmenMon.Core.FanControlKind.Bios ? " (no EC fan register is read or written; RPM = BIOS level x 100)" : ""));
+                sb.AppendLine($"- Fan control: `{fans.Control}`" + (fans.Control == OmenMon.Core.FanControlKind.Bios ? " (no EC fan register is read or written; RPM = BIOS 0x2D speed x 100)" : ""));
                 sb.AppendLine($"- Mode: `{(fans.GetMode()?.ToString() ?? "unknown")}`, Manual: `{fans.GetManual()}`, Max: `{fans.GetMax()}`, Off: `{fans.GetOff()}`, Countdown: `{fans.GetCountdown()}` s");
                 foreach(string refused in AbsentComponent.Refused)
                     sb.AppendLine($"- Refused EC write: {refused}");
@@ -252,7 +252,7 @@ namespace OmenMon.AppCli {
                     // resolution order (AutoCal override → preset EC speed register).
                     string source = "preset EC speed register";
                     if(fans.Control == OmenMon.Core.FanControlKind.Bios)
-                        source = "BIOS level x 100 (BIOS-only model)";
+                        source = "BIOS 0x2D speed x 100 (BIOS-only model)";
                     else try {
                         byte reg = 0;
                         EcDiffScanner.Mode mode = default(EcDiffScanner.Mode);

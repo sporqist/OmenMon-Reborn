@@ -62,7 +62,7 @@ namespace OmenMon.Hardware.Platform {
         // How the fans are controlled (<FanControl>Bios</FanControl> in the model entry).
         // Ec, the default, uses the fan registers above as before. Bios uses none of them:
         // no EC fan register is read or written, levels go through the BIOS (and the
-        // fan-safety guard), the speed is the 0x2D level x 100, and temperatures come
+        // fan-safety guard), the speed is what BIOS 0x2D reports (x 100 rpm), and temperatures come
         // from BIOS 0x23 plus TempCpuReg / TempGpuReg (see Platform). A Bios model needs
         // none of the register elements.
         public FanControlKind FanControl = FanControlKind.Ec;
