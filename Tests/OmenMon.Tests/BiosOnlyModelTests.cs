@@ -198,6 +198,37 @@ namespace OmenMon.Tests {
             Assert.True(AutoCal.IsKnownBoard("8C77"));
         }
 
+        // T2: the shipped 8BAC entry is BIOS-only (temperature registers kept: CPU 0xB2,
+        // GPU 0xB4), and a whole GUI session on it, with the shipped configuration, writes
+        // nothing to an 8BAC-like EC (the measured 0x62 = 0x16, 0x63 = 0x20, the SMBus
+        // buffer after it, 0x59 = 0x01) whether 0xF4 reads 0x00 (measured) or 0x02
+        [Theory]
+        [InlineData((byte) 0x00)]
+        [InlineData((byte) 0x02)]
+        public void Shipped8Bac_IsBiosOnly_GuiSessionWritesNothingToTheEc(byte switchByte) {
+            File.Copy(ShippedConfig(), File_, true);
+            Config.Load();
+            Assert.Empty(Config.ModelLoadProblems);
+            PlatformPreset p = Config.Models["8BAC"];
+            Assert.Equal(FanControlKind.Bios, p.FanControl);
+            Assert.Equal(0xB2, p.TempCpuReg);
+            Assert.Equal(0xB4, p.TempGpuReg);
+
+            using var rig = new TestRig(preset: p);
+            BiosOnlySessionTests.Fill8C77Image(rig.Ec, switchByte);
+            rig.Ec.Data[0x59] = 0x01;
+            rig.SetCpuTemperature(45);
+            rig.Ec.GpuTemperature = 48;
+            byte[] image = (byte[]) rig.Ec.Data.Clone();
+            rig.Ec.Reads.Clear();
+
+            List<(int, int)> coolOff = BiosOnlySessionTests.RunSession(new GuiSession(rig));
+
+            image[FakeEcRegisters.CpuTempRegister] = rig.Ec.Data[FakeEcRegisters.CpuTempRegister];
+            image[FakeEcRegisters.GpuTempRegister] = rig.Ec.Data[FakeEcRegisters.GpuTempRegister];
+            BiosOnlySessionTests.AssertBiosOnly(rig, image, coolOff, FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister);
+        }
+
         // T4: what the unknown-model prompt saves (Config.SaveModel of the detector's
         // result) has no control register, and loads back as a BIOS-only model
         [Fact]

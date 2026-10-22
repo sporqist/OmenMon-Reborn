@@ -460,24 +460,21 @@
                 <ModeReg>149</ModeReg>
                 <SwitchReg>244</SwitchReg>
             </Model>
-            <!-- 8BAC: HP OMEN 16-wf0xxx (2023, i7-13700HX / RTX 4080, BIOS F.30). Fan levels go through the BIOS;
-                 0x11 is the CPU fan target, the GPU fan has no EC register. Mode register 0x59, temperatures 0xB2/0xB4.
-                 Rate, countdown, manual and switch registers are taken from 8BAB and have no observed effect here. -->
+            <!-- 8BAC: HP OMEN 16-wf0xxx (2023, i7-13700HX / RTX 4080, BIOS F.30). BIOS fan control only: no EC fan
+                 register is read or written. Fan levels go through BIOS 0x10/0x2E (0/0 = both fans off, 255 = leave
+                 that fan, a level holds about 124 s after the last 0x2E or 0x10); the speed is BIOS 0x2D x 100, a
+                 measured speed (it ramps over ~15 s after a set and jitters at steady state). Temperatures: CPU EC
+                 0xB2 (= BIOS 0x23[1]), GPU EC 0xB4 (0 while the dGPU is parked).
+                 The EC registers this entry used to carry were taken from 8BAB and never verified here; on the 8BAC
+                 ACPI map they are other data (read 2026-10-22): 0x62 SMAD = 0x16 and 0x63 SMCM = 0x20 are the EC's
+                 SMBus host address (the battery, 0x0B shifted left) and command (SBS ManufacturerName), with the
+                 SMBus data block from 0x64; the rate registers 0x2E/0x2F and 0x3A/0x3B are inside BCTL (0x2D-0x3C,
+                 a 16-byte battery string); 0xF4 (the fan-off switch) has no field and reads 0x00; 0x59 is OGHM, the
+                 thermal policy byte (0x01). -->
             <Model ProductId="8BAC" DisplayName="HP Omen 16 (2023, wf0xxx, 8BAC)">
-                <FanLevelReg0>17</FanLevelReg0>
-                <FanLevelReg1>17</FanLevelReg1>
-                <FanRateReadReg0>46</FanRateReadReg0>
-                <FanRateReadReg1>47</FanRateReadReg1>
-                <FanRateWriteReg0>58</FanRateWriteReg0>
-                <FanRateWriteReg1>59</FanRateWriteReg1>
-                <FanSpeedReg0>17</FanSpeedReg0>
-                <FanSpeedReg1>17</FanSpeedReg1>
+                <FanControl>Bios</FanControl>
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
-                <CountdownReg>99</CountdownReg>
-                <ManualReg>98</ManualReg>
-                <ModeReg>89</ModeReg>
-                <SwitchReg>244</SwitchReg>
             </Model>
             <!-- 8C77: HP OMEN 16 (2024, wf1xxx), BIOS F.20. BIOS fan control only: no EC fan register is read or written.
                  Measured on the board (2026-10-21/22, fan test, ear test, ACPI tables via acpiexec, cross-checked live):
