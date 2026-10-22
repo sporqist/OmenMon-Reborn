@@ -789,7 +789,7 @@ namespace OmenMon.AppGui {
                 // shows no preset: leaving the selection alone left the list on its first
                 // entry, "ECO (Quiet & 60Hz)", which was then shown as if it were active
                 // (2026-10-16, on hardware)
-                PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset);
+                PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset, Context.Op.Platform.Model);
                 if(presetNow.HasValue)
                     this.CmbFanMode.SelectedValue = PerformancePresets.GetName(presetNow.Value);
                 else

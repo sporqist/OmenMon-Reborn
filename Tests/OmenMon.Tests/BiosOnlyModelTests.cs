@@ -74,6 +74,7 @@ namespace OmenMon.Tests {
                 <ModeReg>149</ModeReg>
                 <SwitchReg>244</SwitchReg>
                 <TempGpuFromDriver>true</TempGpuFromDriver>
+                <EcoQuietMode>48</EcoQuietMode>
             </Model>
             <Model ProductId=""BAD1"" DisplayName=""EC board without a switch register"">
                 <FanLevelReg0>52</FanLevelReg0>
@@ -111,6 +112,7 @@ namespace OmenMon.Tests {
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
                 <ModeReg Verified=""true"">89</ModeReg>
+                <EcoQuietMode>0x30</EcoQuietMode>
                 <DisplaySensor Name=""SKTB"">179</DisplaySensor>
                 <DisplaySensor Name=""CATT"">167</DisplaySensor>
             </Model>
@@ -144,6 +146,14 @@ namespace OmenMon.Tests {
             <Model ProductId=""BAD7"" DisplayName=""TempGpuFromDriver is not a bool"">
                 <FanControl>Bios</FanControl>
                 <TempGpuFromDriver>yes</TempGpuFromDriver>
+            </Model>
+            <Model ProductId=""BAD8"" DisplayName=""EcoQuietMode is not a defined BIOS mode"">
+                <FanControl>Bios</FanControl>
+                <EcoQuietMode>0x99</EcoQuietMode>
+            </Model>
+            <Model ProductId=""BAD9"" DisplayName=""EcoQuietMode is a name, not a byte"">
+                <FanControl>Bios</FanControl>
+                <EcoQuietMode>Default</EcoQuietMode>
             </Model>
         </Models>
     </Config>
@@ -244,6 +254,34 @@ namespace OmenMon.Tests {
             Assert.Equal(new[] { "GPTM", "BIOS" }, rig.Platform.Temperature.Select(s => s.GetName()));
         }
 
+        // The mode Eco and Quiet send round-trips on either model kind: loaded from hex or
+        // decimal, absent as null, saved in hex when the entry is rebuilt from memory
+        // (left out without one), and it loads back the same
+        [Fact]
+        public void Model_EcoQuietMode_LoadsSavesAndLoadsAgain() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Assert.Equal(BiosData.FanMode.Default, Config.Models["8BAC"].EcoQuietMode);
+            Assert.Equal(BiosData.FanMode.Default, Config.Models["EC01"].EcoQuietMode);
+            Assert.Null(Config.Models["8C77"].EcoQuietMode);
+
+            Config.Models["8BAC"].DisplayName = "renamed";
+            Config.Models["EC01"].DisplayName = "renamed too";
+            Config.Models["8C77"].DisplayName = "renamed as well";
+            Config.Save();
+            string text = File.ReadAllText(File_);
+            Assert.Contains("<EcoQuietMode>0x30</EcoQuietMode>", Regex.Match(text, @"<Model ProductId=""8BAC""[\s\S]*?</Model>").Value);
+            Assert.Contains("<EcoQuietMode>0x30</EcoQuietMode>", Regex.Match(text, @"<Model ProductId=""EC01""[\s\S]*?</Model>").Value);
+            Assert.DoesNotContain("EcoQuietMode", Regex.Match(text, @"<Model ProductId=""8C77""[\s\S]*?</Model>").Value);
+
+            Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
+            Config.Load();
+            Assert.Equal("renamed", Config.Models["8BAC"].DisplayName);
+            Assert.Equal(BiosData.FanMode.Default, Config.Models["8BAC"].EcoQuietMode);
+            Assert.Equal(BiosData.FanMode.Default, Config.Models["EC01"].EcoQuietMode);
+            Assert.Null(Config.Models["8C77"].EcoQuietMode);
+        }
+
         // A malformed entry is not loaded, the reason is recorded (for -Diag), and the
         // file keeps the entry; nothing is read as 0
         [Fact]
@@ -257,6 +295,8 @@ namespace OmenMon.Tests {
             Assert.False(Config.Models.ContainsKey("BAD5"));
             Assert.False(Config.Models.ContainsKey("BAD6"));
             Assert.False(Config.Models.ContainsKey("BAD7"));
+            Assert.False(Config.Models.ContainsKey("BAD8"));
+            Assert.False(Config.Models.ContainsKey("BAD9"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD1") && p.Contains("SwitchReg") && p.Contains("missing"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD2") && p.Contains("FanLevelReg1") && p.Contains("0xZZ"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD3") && p.Contains("Smm"));
@@ -264,7 +304,9 @@ namespace OmenMon.Tests {
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD5") && p.Contains("CPUT"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD6") && p.Contains("twice"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD7") && p.Contains("TempGpuFromDriver") && p.Contains("yes"));
-            Assert.Equal(7, Config.ModelLoadProblems.Count);
+            Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD8") && p.Contains("EcoQuietMode") && p.Contains("0x99"));
+            Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD9") && p.Contains("EcoQuietMode") && p.Contains("'Default'"));
+            Assert.Equal(9, Config.ModelLoadProblems.Count);
 
             Config.Save();
             string text = File.ReadAllText(File_);
@@ -301,6 +343,58 @@ namespace OmenMon.Tests {
             Assert.True(p.ModeRegVerified);
             Assert.Equal(0x59, p.ModeReg);
             Assert.True(AutoCal.IsKnownBoard("8C77"));
+        }
+
+        // Of the shipped models only 8BAC and 8C77 have Eco and Quiet send 0x30 (PL1 55 W
+        // on AC; 0x03 gave 130 W like Performance, measured); every other model, EC or
+        // not, keeps 0x03
+        [Fact]
+        public void ShippedModels_EcoAndQuiet_Send0x30OnlyOn8BacAnd8C77() {
+            File.Copy(ShippedConfig(), File_, true);
+            Config.Load();
+            Assert.Empty(Config.ModelLoadProblems);
+            Assert.Equal(new[] { "8BAC", "8C77" },
+                Config.Models.Values.Where(m => m.EcoQuietMode.HasValue).Select(m => m.ProductId).OrderBy(id => id).ToArray());
+            foreach(PlatformPreset model in Config.Models.Values) {
+                BiosData.FanMode expected = model.ProductId == "8BAC" || model.ProductId == "8C77"
+                    ? BiosData.FanMode.Default : BiosData.FanMode.LegacyQuiet;
+                Assert.Equal(expected, PerformancePresets.Resolve(PerformancePreset.Eco, model).FanMode);
+                Assert.Equal(expected, PerformancePresets.Resolve(PerformancePreset.Quiet, model).FanMode);
+                Assert.Equal(BiosData.FanMode.Default, PerformancePresets.Resolve(PerformancePreset.Default, model).FanMode);
+                Assert.Equal(BiosData.FanMode.Performance, PerformancePresets.Resolve(PerformancePreset.Performance, model).FanMode);
+            }
+            Assert.Contains(Config.Models.Values, m => !m.IsBiosOnly);
+        }
+
+        // On the shipped 8BAC entry, Eco and Quiet send 0x1A [FF 30 00 00] (never 0x03),
+        // 0x59 then reads 0x30, and the preset shown is the one applied; after a restart
+        // (no preset applied yet) 0x30 shows Default
+        [Fact]
+        public void Shipped8Bac_EcoAndQuiet_Send0x30() {
+            File.Copy(ShippedConfig(), File_, true);
+            Config.Load();
+            PlatformPreset p = Config.Models["8BAC"];
+
+            using var rig = new TestRig(preset: p);
+            BiosOnlySessionTests.Fill8C77Image(rig.Ec, 0x00);
+            rig.Ec.Data[0x59] = 0x01;
+            rig.Bios.OnFanMode = m => rig.Ec.Data[0x59] = m;   // GC1A: OGHM = data[1]
+            rig.SetCpuTemperature(45);
+            rig.Ec.GpuTemperature = 48;
+            var session = new GuiSession(rig);
+
+            foreach(PerformancePreset preset in new[] { PerformancePreset.Eco, PerformancePreset.Quiet }) {
+                rig.Bios.Calls.Clear();
+                session.ApplyPreset(preset);
+                Assert.Equal(new byte[] { 0xFF, 0x30, 0x00, 0x00 }, rig.Bios.Calls.Single(c => c.Type == 0x1A).Data);
+                Assert.Equal(0x30, rig.Ec.Data[0x59]);
+                session.Run(2);
+                Assert.Equal(BiosData.FanMode.Default, session.Mode);
+                Assert.Equal(preset, PerformancePresets.ForMode(session.Mode, preset, p));
+            }
+            Assert.Equal(PerformancePreset.Default, PerformancePresets.ForMode(session.Mode, null, p));
+            Assert.DoesNotContain(rig.Bios.Calls, c => c.Type == 0x1A && c.Data[1] == 0x03);
+            Assert.Empty(rig.Ec.Writes);
         }
 
         // The shipped 8C77 entry through the session, on an image as measured (0x59 =

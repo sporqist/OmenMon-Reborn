@@ -13,7 +13,8 @@ namespace OmenMon.Hardware.Platform {
     // OmenMon's own choices, not BIOS fan modes: each one resolves to a real BIOS
     // thermal policy (BiosData.FanMode) plus GPU power, optionally a display refresh
     // rate, and fixed fan levels. Several presets may share a BIOS mode (Eco and Quiet
-    // both use thermal policy 3), so the preset is the thing to remember, not the mode.
+    // both use thermal policy 3, or the model's <EcoQuietMode>: 0x30 on 8BAC and 8C77,
+    // Default's too), so the preset is the thing to remember, not the mode.
     public enum PerformancePreset {
         Eco,
         Quiet,
@@ -59,22 +60,23 @@ namespace OmenMon.Hardware.Platform {
                 && Enum.IsDefined(typeof(PerformancePreset), preset);
         }
 
-        // Resolves a preset to concrete settings. The fixed levels are the values the
-        // presets have always used (#102); they are levels, not caps, and the fan-safety
-        // guard and thermal panic apply to them like to any other level.
-        public static PresetSettings Resolve(PerformancePreset preset) {
+        // Resolves a preset to concrete settings on a model (null: none). The fixed levels
+        // are the values the presets have always used (#102); they are levels, not caps,
+        // and the fan-safety guard and thermal panic apply to them like to any other level.
+        // Eco and Quiet send the model's EcoQuietMode if it has one, else LegacyQuiet.
+        public static PresetSettings Resolve(PerformancePreset preset, PlatformPreset model) {
             switch(preset) {
 
                 case PerformancePreset.Eco:
                     return new PresetSettings {
-                        FanMode = BiosData.FanMode.LegacyQuiet,
+                        FanMode = QuietMode(model),
                         GpuPower = BiosData.GpuPowerLevel.Min,
                         RefreshRate = Config.PresetRefreshRateLow,
                         Levels = new byte[] { 28, 28 } };
 
                 case PerformancePreset.Quiet:
                     return new PresetSettings {
-                        FanMode = BiosData.FanMode.LegacyQuiet,
+                        FanMode = QuietMode(model),
                         GpuPower = BiosData.GpuPowerLevel.Min,
                         Levels = new byte[] { 32, 32 } };
 
@@ -112,25 +114,35 @@ namespace OmenMon.Hardware.Platform {
             }
         }
 
-        // The preset to show for the BIOS mode currently reported. The last preset
-        // applied wins if its mode matches (Eco and Quiet share mode 3); otherwise the
-        // preset named after the mode, or null if no preset uses it. An unknown mode
-        // (null) shows no preset.
-        public static PerformancePreset? ForMode(BiosData.FanMode? mode, PerformancePreset? lastApplied) {
+        // The BIOS mode of the Eco and Quiet presets on a model
+        private static BiosData.FanMode QuietMode(PlatformPreset model) {
+            return model != null && model.EcoQuietMode.HasValue
+                ? model.EcoQuietMode.Value
+                : BiosData.FanMode.LegacyQuiet;
+        }
+
+        // The presets a reported mode is shown as when the last preset applied does not
+        // send it, first match first: Default before Quiet, so a fresh start on a model
+        // whose Eco and Quiet send 0x30 shows Default
+        private static readonly PerformancePreset[] ShownForMode = {
+            PerformancePreset.Default,
+            PerformancePreset.Performance,
+            PerformancePreset.Quiet };
+
+        // The preset to show for the BIOS mode currently reported on a model. The last
+        // preset applied wins if it sends that mode (Eco and Quiet share one, and on
+        // 8BAC and 8C77 Default too); otherwise the first of Default, Performance and
+        // Quiet that sends it, or null if none does (0x03 on a model whose Eco and
+        // Quiet send another mode). An unknown mode (null) shows no preset.
+        public static PerformancePreset? ForMode(BiosData.FanMode? mode, PerformancePreset? lastApplied, PlatformPreset model) {
             if(!mode.HasValue)
                 return null;
-            if(lastApplied.HasValue && Resolve(lastApplied.Value).FanMode == mode.Value)
+            if(lastApplied.HasValue && Resolve(lastApplied.Value, model).FanMode == mode.Value)
                 return lastApplied;
-            switch(mode.Value) {
-                case BiosData.FanMode.LegacyQuiet:
-                    return PerformancePreset.Quiet;
-                case BiosData.FanMode.Default:
-                    return PerformancePreset.Default;
-                case BiosData.FanMode.Performance:
-                    return PerformancePreset.Performance;
-                default:
-                    return null;
-            }
+            foreach(PerformancePreset preset in ShownForMode)
+                if(Resolve(preset, model).FanMode == mode.Value)
+                    return preset;
+            return null;
         }
 
     }

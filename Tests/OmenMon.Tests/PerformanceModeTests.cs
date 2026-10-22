@@ -5,6 +5,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
+using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Platform;
 using OmenMon.Library;
@@ -32,8 +33,8 @@ namespace OmenMon.Tests {
 
         [Fact]
         public void Presets_AreDistinct_EvenWhenTheyShareABiosMode() {
-            PresetSettings eco = PerformancePresets.Resolve(PerformancePreset.Eco);
-            PresetSettings quiet = PerformancePresets.Resolve(PerformancePreset.Quiet);
+            PresetSettings eco = PerformancePresets.Resolve(PerformancePreset.Eco, null);
+            PresetSettings quiet = PerformancePresets.Resolve(PerformancePreset.Quiet, null);
             Assert.Equal(eco.FanMode, quiet.FanMode);
             Assert.NotNull(eco.RefreshRate);
             Assert.Null(quiet.RefreshRate);
@@ -55,7 +56,7 @@ namespace OmenMon.Tests {
         [Fact]
         public void EveryPreset_ResolvesToADefinedBiosMode() {
             foreach(PerformancePreset preset in PerformancePresets.All)
-                Assert.True(Enum.IsDefined(typeof(BiosData.FanMode), PerformancePresets.Resolve(preset).FanMode));
+                Assert.True(Enum.IsDefined(typeof(BiosData.FanMode), PerformancePresets.Resolve(preset, null).FanMode));
         }
 
         [Theory]
@@ -67,7 +68,7 @@ namespace OmenMon.Tests {
             string saved = Config.CustomPresetFanMode;
             try {
                 Config.CustomPresetFanMode = configured;
-                Assert.Equal(BiosData.FanMode.Default, PerformancePresets.Resolve(PerformancePreset.Custom).FanMode);
+                Assert.Equal(BiosData.FanMode.Default, PerformancePresets.Resolve(PerformancePreset.Custom, null).FanMode);
             } finally {
                 Config.CustomPresetFanMode = saved;
             }
@@ -81,7 +82,7 @@ namespace OmenMon.Tests {
                 Config.CustomPresetFanMode = "Performance";
                 Config.CustomPresetCpuLevel = 33;
                 Config.CustomPresetGpuLevel = 36;
-                PresetSettings custom = PerformancePresets.Resolve(PerformancePreset.Custom);
+                PresetSettings custom = PerformancePresets.Resolve(PerformancePreset.Custom, null);
                 Assert.Equal(BiosData.FanMode.Performance, custom.FanMode);
                 Assert.Equal(new byte[] { 33, 36 }, custom.Levels);
             } finally {
@@ -104,12 +105,80 @@ namespace OmenMon.Tests {
         [Fact]
         public void DisplayedPreset_FollowsTheLastAppliedOne() {
             Assert.Equal(PerformancePreset.Eco,
-                PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, PerformancePreset.Eco));
+                PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, PerformancePreset.Eco, null));
             Assert.Equal(PerformancePreset.Quiet,
-                PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, null));
+                PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, null, null));
             Assert.Equal(PerformancePreset.Quiet,
-                PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, PerformancePreset.Performance));
-            Assert.Null(PerformancePresets.ForMode(BiosData.FanMode.Cool, null));
+                PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, PerformancePreset.Performance, null));
+            Assert.Null(PerformancePresets.ForMode(BiosData.FanMode.Cool, null, null));
+        }
+
+        // A model whose Eco and Quiet send 0x30 (<EcoQuietMode>, as 8BAC and 8C77)
+        private static PlatformPreset EcoQuiet30() {
+            return new PlatformPreset {
+                ProductId = "8BAC",
+                FanControl = FanControlKind.Bios,
+                EcoQuietMode = BiosData.FanMode.Default };
+        }
+
+        // Eco and Quiet send the model's EcoQuietMode; the other presets are unchanged.
+        // Without one (no model, an EC model, a BIOS-only model without the element)
+        // they send LegacyQuiet as before
+        [Fact]
+        public void EcoAndQuiet_SendTheModelsEcoQuietMode() {
+            PlatformPreset model = EcoQuiet30();
+            Assert.Equal(BiosData.FanMode.Default, PerformancePresets.Resolve(PerformancePreset.Eco, model).FanMode);
+            Assert.Equal(BiosData.FanMode.Default, PerformancePresets.Resolve(PerformancePreset.Quiet, model).FanMode);
+            Assert.Equal(BiosData.FanMode.Default, PerformancePresets.Resolve(PerformancePreset.Default, model).FanMode);
+            Assert.Equal(BiosData.FanMode.Performance, PerformancePresets.Resolve(PerformancePreset.Performance, model).FanMode);
+            Assert.Equal(PerformancePresets.Resolve(PerformancePreset.Custom, null).FanMode,
+                PerformancePresets.Resolve(PerformancePreset.Custom, model).FanMode);
+
+            // The rest of Eco and Quiet stays as it was
+            foreach(PerformancePreset preset in new[] { PerformancePreset.Eco, PerformancePreset.Quiet }) {
+                PresetSettings before = PerformancePresets.Resolve(preset, null);
+                PresetSettings now = PerformancePresets.Resolve(preset, model);
+                Assert.Equal(before.GpuPower, now.GpuPower);
+                Assert.Equal(before.RefreshRate, now.RefreshRate);
+                Assert.Equal(before.Levels, now.Levels);
+            }
+
+            foreach(PlatformPreset? without in new[] {
+                null,
+                PlatformPreset.Default,
+                new PlatformPreset { ProductId = "BIO1", FanControl = FanControlKind.Bios } }) {
+                Assert.Equal(BiosData.FanMode.LegacyQuiet, PerformancePresets.Resolve(PerformancePreset.Eco, without).FanMode);
+                Assert.Equal(BiosData.FanMode.LegacyQuiet, PerformancePresets.Resolve(PerformancePreset.Quiet, without).FanMode);
+            }
+        }
+
+        // With 0x30 shared by Default, Eco and Quiet: the last preset applied wins, a
+        // fresh start (none applied) shows Default, and 0x03, which no preset sends on
+        // that model any more, shows none
+        [Fact]
+        public void DisplayedPreset_WhenDefaultEcoAndQuietShare0x30() {
+            string saved = Config.CustomPresetFanMode;
+            try {
+                Config.CustomPresetFanMode = "Default";
+                PlatformPreset model = EcoQuiet30();
+                foreach(PerformancePreset applied in new[] {
+                    PerformancePreset.Eco, PerformancePreset.Quiet, PerformancePreset.Default, PerformancePreset.Custom })
+                    Assert.Equal(applied, PerformancePresets.ForMode(BiosData.FanMode.Default, applied, model));
+                Assert.Equal(PerformancePreset.Default, PerformancePresets.ForMode(BiosData.FanMode.Default, null, model));
+                Assert.Equal(PerformancePreset.Default,
+                    PerformancePresets.ForMode(BiosData.FanMode.Default, PerformancePreset.Performance, model));
+                Assert.Equal(PerformancePreset.Performance,
+                    PerformancePresets.ForMode(BiosData.FanMode.Performance, PerformancePreset.Eco, model));
+                Assert.Null(PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, null, model));
+                Assert.Null(PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, PerformancePreset.Eco, model));
+                Assert.Null(PerformancePresets.ForMode(null, PerformancePreset.Eco, model));
+
+                // A model without it: as before
+                Assert.Equal(PerformancePreset.Quiet, PerformancePresets.ForMode(BiosData.FanMode.LegacyQuiet, null, PlatformPreset.Default));
+                Assert.Equal(PerformancePreset.Default, PerformancePresets.ForMode(BiosData.FanMode.Default, PerformancePreset.Eco, PlatformPreset.Default));
+            } finally {
+                Config.CustomPresetFanMode = saved;
+            }
         }
 
     }

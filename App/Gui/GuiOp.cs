@@ -81,8 +81,9 @@ namespace OmenMon.AppGui {
         }
 
         // Last performance preset applied. Presets can share a BIOS mode (Eco and Quiet
-        // both use thermal policy 3), so the reported mode alone cannot tell which one
-        // is active. Written under HardwareLock, read by the UI for display.
+        // both use thermal policy 3; on 8BAC and 8C77 they and Default use 0x30), so the
+        // reported mode alone cannot tell which one is active. Written under
+        // HardwareLock, read by the UI for display.
         internal volatile object activePreset;
         internal PerformancePreset? ActivePreset {
             get { return this.activePreset as PerformancePreset?; }
@@ -93,7 +94,7 @@ namespace OmenMon.AppGui {
         // and GPU power, the refresh rate for Eco, and its fixed levels (through the
         // fan-safety guard). Callers hold HardwareLock.
         internal void ApplyPreset(PerformancePreset preset) {
-            PresetSettings settings = PerformancePresets.Resolve(preset);
+            PresetSettings settings = PerformancePresets.Resolve(preset, this.Platform.Model);
             FanActions.ApplyPreset(this.Platform.Fans, this.Platform.System, settings, () => {
                 if(settings.RefreshRate.HasValue) {
                     Os.SetRefreshRate(settings.RefreshRate.Value);

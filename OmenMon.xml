@@ -474,6 +474,10 @@
                  writes its data[1] verbatim into OGHM, notifies NPCF and, on AC, sets the power limits from bit 0;
                  nothing else writes it. So 0x59 reads the mode last sent, and a mode read from it may be sent again
                  (a program's restore, constant speed). 0x00 there means no 0x1A since boot (shown as unknown).
+                 Eco and Quiet send mode 0x30 (EcoQuietMode), not 0x03: on AC, 0x1A [FF m 00 00] sets PL2/PL1/PL4 to
+                 130/130/200 W if bit 0 of m is set, else 130/55/200 W (measured 2026-10-22): 0x03 ran PL1 130 W like
+                 Performance (0x31), 0x30 gives 55 W. HP's software also uses 0x30 for Default and Eco on these boards.
+                 On battery 0x1A leaves the power limits alone.
                  Display-only temperatures (shown, fed into nothing; CPU, GPU and BIOS 0x23 stay the safety sources),
                  under their names in the 8BAC ACPI field list: 0xB0 CTMP, 0xB3 SKTB, 0xB6 EST1, 0xB7 EST2 (board),
                  0xA7 CATT. The same fields read as real temperatures on 8C77 (see there); 0xB5 DPOT reads 0 there
@@ -483,6 +487,7 @@
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
                 <ModeReg Verified="true">89</ModeReg>
+                <EcoQuietMode>0x30</EcoQuietMode>
                 <DisplaySensor Name="CTMP">176</DisplaySensor>
                 <DisplaySensor Name="SKTB">179</DisplaySensor>
                 <DisplaySensor Name="EST1">182</DisplaySensor>
@@ -516,7 +521,9 @@
                    0x00 until the first 0x1A since boot (shown as unknown, never sent). Live-confirmed 2026-10-22
                    (F.20, on AC): 0x20008/0x1A [FF m 00 00] set EC 0x59 to 0x30, 0x31, 0x03 and back to 0x00, and
                    0x2A read back PL2/PL1/PL4 130/55/200, 130/130/200 and 130/130/200 W for 0x30, 0x31 and 0x03
-                   (bit 0 of the mode selects PL1 130 W), as in the ACPI tables.
+                   (bit 0 of the mode selects PL1 130 W), as in the ACPI tables. So Eco and Quiet send 0x30
+                   (EcoQuietMode; 0x03 would run PL1 130 W like Performance), as HP's software does for Default and
+                   Eco on these boards. On battery 0x1A leaves the power limits alone.
                  * Keyboard (2026-10-22, observed by the owner): the colours work (0x20009/0x03, header 3); the
                    backlight toggle does not: 0x20009/0x05 [0x64] (off) returned rc 0 with no visible effect, and
                    0x20009/0x04 kept reading 0xE4.
@@ -530,6 +537,7 @@
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
                 <ModeReg Verified="true">89</ModeReg>
+                <EcoQuietMode>0x30</EcoQuietMode>
                 <DisplaySensor Name="CTMP">176</DisplaySensor>
                 <DisplaySensor Name="SKTB">179</DisplaySensor>
                 <DisplaySensor Name="EST1">182</DisplaySensor>

@@ -846,6 +846,19 @@ namespace OmenMon.Library {
             if(preset.IsBiosOnly && preset.ModeRegVerified)
                 preset.ModeReg = read(XmlElementModeReg, true, 0);
 
+            // The BIOS mode the Eco and Quiet presets send (<EcoQuietMode>0x30</EcoQuietMode>):
+            // a byte that is a defined BIOS fan mode; absent: LegacyQuiet. Any model kind
+            XmlNode ecoQuiet = node[XmlElementEcoQuietMode];
+            if(ok && ecoQuiet != null) {
+                string text = ecoQuiet.InnerText.Trim();
+                if(Conv.GetByte(text, out byte mode) && Enum.IsDefined(typeof(BiosData.FanMode), mode))
+                    preset.EcoQuietMode = (BiosData.FanMode) mode;
+                else {
+                    ok = false;
+                    why = "Model " + productId + ": <" + XmlElementEcoQuietMode + "> is '" + text + "', not a defined BIOS fan mode";
+                }
+            }
+
             // Display-only temperatures: <DisplaySensor Name="CTMP">176</DisplaySensor>, a
             // name of 1-8 letters or digits that the fan logic never looks up (not CPUT,
             // GPTM or BIOS), once each, and a byte
@@ -1642,6 +1655,7 @@ namespace OmenMon.Library {
                     mnode.AppendChild(xml.CreateElement(XmlElementTempGpuFromDriver)).InnerText = XmlSaveBoolTrue;
                 if(p.ModeRegVerified && p.ModeReg != 0)
                     BuildModeReg(xml, mnode, p);
+                BuildEcoQuietMode(xml, mnode, p);
                 BuildDisplaySensors(xml, mnode, p);
                 return mnode;
             }
@@ -1667,6 +1681,7 @@ namespace OmenMon.Library {
             if(p.TempGpuReg != 0)
                 mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
             BuildModeReg(xml, mnode, p);
+            BuildEcoQuietMode(xml, mnode, p);
             mnode.AppendChild(xml.CreateElement(XmlElementSwitchReg)).InnerText        = Conv.GetString((uint) p.SwitchReg, 1, 10);
             BuildDisplaySensors(xml, mnode, p);
             return mnode;
@@ -1691,6 +1706,12 @@ namespace OmenMon.Library {
                 mode.SetAttribute(XmlAttrModeRegVerified, XmlSaveBoolTrue);
             mode.InnerText = Conv.GetString((uint) p.ModeReg, 1, 10);
             mnode.AppendChild(mode);
+        }
+
+        // Adds a model's <EcoQuietMode> (in hex, as BIOS modes are written), if it has one
+        private static void BuildEcoQuietMode(XmlDocument xml, XmlElement mnode, OmenMon.Hardware.Platform.PlatformPreset p) {
+            if(p.EcoQuietMode.HasValue)
+                mnode.AppendChild(xml.CreateElement(XmlElementEcoQuietMode)).InnerText = "0x" + ((byte) p.EcoQuietMode.Value).ToString("X2");
         }
 
         // Adds or updates a model preset in the dictionary and persists to XML

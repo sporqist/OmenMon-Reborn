@@ -1029,7 +1029,7 @@ namespace OmenMon.AppGui {
 
             // Retrieve the current performance preset (from the BIOS mode and the last
             // preset applied, since presets can share a BIOS mode)
-            PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset);
+            PerformancePreset? presetNow = PerformancePresets.ForMode(s.Mode, Context.Op.ActivePreset, Context.Op.Platform.Model);
             string fanModeNameNow = presetNow.HasValue ? PerformancePresets.GetName(presetNow.Value) : "";
             string fanProgNameNow = s.ProgramName;
             bool isFanMax = s.Max;

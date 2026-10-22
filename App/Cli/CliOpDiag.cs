@@ -173,6 +173,8 @@ namespace OmenMon.AppCli {
                     sb.AppendLine($"- Fan control: `{preset.FanControl}`" + (preset.IsBiosOnly ? " (the EC fan registers below are not used)" : ""));
                     if(preset.IsBiosOnly && preset.TempGpuReg == 0 && preset.TempGpuFromDriver)
                         sb.AppendLine("- GPU temperature: from the graphics driver (NVML) while the dGPU is awake");
+                    if(preset.EcoQuietMode.HasValue)
+                        sb.AppendLine($"- Eco and Quiet presets: BIOS mode `0x{(byte) preset.EcoQuietMode.Value:X2}` (`EcoQuietMode`)");
                     sb.AppendLine();
                     sb.AppendLine("| Register | Value (dec) | Value (hex) |");
                     sb.AppendLine("|----------|-------------|-------------|");

@@ -118,7 +118,7 @@ namespace OmenMon.Tests.Fakes {
 
         // GuiOp.ApplyPreset (the refresh rate left out: not hardware)
         public void ApplyPreset(PerformancePreset preset) {
-            FanActions.ApplyPreset(this.Fans, this.Rig.Platform.System, PerformancePresets.Resolve(preset));
+            FanActions.ApplyPreset(this.Fans, this.Rig.Platform.System, PerformancePresets.Resolve(preset, this.Rig.Platform.Model));
         }
 
         // The tray menu's toggles

@@ -5,6 +5,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using OmenMon.Core;
+using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
 
 namespace OmenMon.Hardware.Platform {
@@ -99,6 +100,13 @@ namespace OmenMon.Hardware.Platform {
         // the model the unknown-model scan saves (AutoDetector), which keeps it as
         // <TempGpuFromDriver>true</TempGpuFromDriver>. BIOS-only models only.
         public bool TempGpuFromDriver;
+
+        // The BIOS mode the Eco and Quiet performance presets send, from
+        // <EcoQuietMode>0x30</EcoQuietMode>; null: LegacyQuiet (0x03), as before it
+        // existed. On 8BAC and 8C77, 0x1A on AC sets PL1 from bit 0 of the mode: 0x03
+        // gives 130 W like Performance, 0x30 gives 55 W (measured), so their entries
+        // say 0x30. Any model kind; always a defined BiosData.FanMode value.
+        public BiosData.FanMode? EcoQuietMode;
 
         // The preset of a board without a model entry whose BIOS fan interface answers
         // (UnknownBoard.Decide): BIOS-only, CPU from BIOS 0x23, GPU from the driver

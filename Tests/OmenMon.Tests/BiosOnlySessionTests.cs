@@ -69,11 +69,11 @@ namespace OmenMon.Tests {
             ec.Data[0xF4] = switchByte;
         }
 
-        // The modes OmenMon may send: every preset's and every configured program's
-        internal static HashSet<byte> AllowedModes() {
+        // The modes OmenMon may send on a model: every preset's and every configured program's
+        internal static HashSet<byte> AllowedModes(PlatformPreset model) {
             var modes = new HashSet<byte>();
             foreach(PerformancePreset p in PerformancePresets.All)
-                modes.Add((byte) PerformancePresets.Resolve(p).FanMode);
+                modes.Add((byte) PerformancePresets.Resolve(p, model).FanMode);
             foreach(FanProgramData program in Config.FanProgram.Values)
                 modes.Add((byte) program.FanMode);
             return modes;
@@ -190,7 +190,7 @@ namespace OmenMon.Tests {
             Assert.Equal(image, rig.Ec.Data);
             Assert.Empty(rig.Ec.Reads.Except(readable));
 
-            HashSet<byte> allowed = AllowedModes();
+            HashSet<byte> allowed = AllowedModes(rig.Platform.Model);
             allowed.UnionWith(registerModes);
             var modes = rig.Bios.Calls.Where(c => c.Type == 0x1A).Select(c => c.Data[1]).ToList();
             Assert.NotEmpty(modes);
