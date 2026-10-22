@@ -20,8 +20,10 @@ namespace OmenMon.Core {
     // A normal run does not end with the hand-back: the BIOS curve stops both fans at
     // light load (8BAC, 2026-10-22: 0/0 for 57 s and counting at 46 °C once the
     // hand-back level from 60/63 expired). It holds the fan-safety floor instead, with
-    // the same keep-alive and supervision, until the OmenMon GUI starts (it takes over),
-    // or Ctrl+C, a key or HoldDefaultSeconds hand back to the BIOS.
+    // the same keep-alive and supervision, until the OmenMon GUI starts (it takes over
+    // with its own fan setting; on Auto it writes nothing, not even its heartbeat, and the
+    // floor expires into the BIOS curve ~124 s after the last keep-alive), or Ctrl+C, a
+    // key or HoldDefaultSeconds hand back to the BIOS.
     public static class FanCheck {
 
         // The levels [cpu, gpu], in rpm / 100

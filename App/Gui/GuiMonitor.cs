@@ -501,7 +501,8 @@ namespace OmenMon.AppGui {
 
         }
 
-        // BIOS heartbeat — keeps Performance Control alive. Paused on battery to avoid
+        // BIOS heartbeat — keeps Performance Control alive (BIOS-only boards: the fan level
+        // OmenMon armed, and only while it has one). Paused on battery to avoid
         // HP firmware triggering an unexpected hibernate (folds in the old HeartbeatTimer).
         // Runs from Pass() and, during a calibration pause, directly from Loop().
         private void TickHeartbeat() {
@@ -511,9 +512,11 @@ namespace OmenMon.AppGui {
             if(this.HeartbeatAccumMs >= Config.BiosHeartbeatInterval) {
                 this.HeartbeatAccumMs = 0;
                 lock(Context.Op.HardwareLock) {
-                    // Quiet for a while after handing fan control back to the BIOS: on
-                    // 8BAC the 0x10 query keeps the last fan level alive, so the BIOS
-                    // curve could never take over (see FanSafetyGuard.HandBackLevel)
+                    // Quiet for a while after handing fan control back to the BIOS, and
+                    // on a BIOS-only board whenever OmenMon has no level of its own armed:
+                    // there the 0x10 query keeps the last fan level alive, whoever set it,
+                    // so the BIOS curve could never take over (see FanArray.HeartbeatAllowed
+                    // and FanSafetyGuard.HandBackLevel)
                     if((!Config.BiosHeartbeatPauseOnBattery
                         || Context.Op.Platform.System.IsFullPowerConfirmed())
                         && Context.Op.Platform.Fans.HeartbeatAllowed)

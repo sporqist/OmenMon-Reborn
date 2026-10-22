@@ -37,7 +37,8 @@ namespace OmenMon.Library {
         public static bool BiosErrorReporting = true;
 
         // BIOS heartbeat interval [ms]: periodic GetFanCount() keeps Performance Control alive
-        // Set to 0 to disable
+        // (BIOS-only boards: only while OmenMon has a fan level of its own armed, see
+        // FanArray.HeartbeatAllowed). Set to 0 to disable
         public static int BiosHeartbeatInterval = 30000;
 
         // Pause BIOS heartbeat on battery power to prevent HP firmware from forcing hibernate.

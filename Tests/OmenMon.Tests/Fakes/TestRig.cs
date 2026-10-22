@@ -27,9 +27,11 @@ namespace OmenMon.Tests.Fakes {
     // With preset, the fan array is the one production builds for that model
     // (Platform.CreateFanArray, e.g. a BIOS-only model) and the platform carries it;
     // a BIOS-only model also gets its production sensors (Platform.CreateTemperatures).
+    // With sharedBios, the rig shares another rig's simulated BIOS: a second process (the GUI
+    // next to -FanCheck, another tool) on the same board.
     public sealed class TestRig : IDisposable {
 
-        public Fake8BacBios Bios { get; } = new Fake8BacBios();
+        public Fake8BacBios Bios { get; }
         public FakeEcRegisters Ec { get; } = new FakeEcRegisters();
         public FakeSettings Settings { get; } = new FakeSettings();
         public FakeGpuDriver GpuDriver { get; } = new FakeGpuDriver();
@@ -46,8 +48,10 @@ namespace OmenMon.Tests.Fakes {
         private readonly IEmbeddedController? savedEc;
         private readonly int savedEcWaitSpinCount;
 
-        public TestRig(bool ecDriver = false, Func<IBiosCtl, IBiosCtl>? fanArrayBios = null, PlatformPreset? preset = null) {
+        public TestRig(bool ecDriver = false, Func<IBiosCtl, IBiosCtl>? fanArrayBios = null, PlatformPreset? preset = null,
+            Fake8BacBios? sharedBios = null) {
 
+            this.Bios = sharedBios ?? new Fake8BacBios();
             Hw.Isolated = true;
             Config.LocaleInit();
 

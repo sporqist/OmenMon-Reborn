@@ -56,7 +56,8 @@ namespace OmenMon.Hardware.Platform {
         // The BIOS fan table's top row per fan (0x2F), null while it cannot be read
         public byte[] GetTableMaximum();
 
-        // Whether the 0x10 heartbeat may run (false shortly after a hand-back)
+        // Whether the 0x10 heartbeat may run: false shortly after a hand-back, and on a
+        // BIOS-only board unless OmenMon itself has a level armed (see FanArray)
         public bool HeartbeatAllowed { get; }
 
         // Whether Supervise() needs to run on every pass
@@ -208,8 +209,8 @@ namespace OmenMon.Hardware.Platform {
 
         // Retrieves the countdown value [s]
         // until automatic settings are restored. BIOS-only: the time a level OmenMon
-        // holds has left from its own last 0x10/0x2E (the BIOS heartbeat, sent
-        // elsewhere, refreshes the hold too)
+        // holds has left from its own last 0x10/0x2E (the GUI's heartbeat, sent
+        // elsewhere while OmenMon holds a level, refreshes the hold too)
         public int GetCountdown() {
             if(this.Control == FanControlKind.Bios) {
                 bool holds = this.Guard != null && this.Guard.HoldsLevel;
@@ -335,8 +336,23 @@ namespace OmenMon.Hardware.Platform {
 
         }
 
+        // Whether the 0x10 heartbeat may run. Never within the quiet period after a
+        // hand-back. EC model: otherwise always (it keeps Performance Control alive).
+        // BIOS-only: only while this OmenMon has a level armed, one it wrote (a program,
+        // constant speed, Fan Off, a preset, panic, a guard raise) and has not handed back,
+        // or Max Fan it switched on. On these boards the 0x10 does nothing but refresh the
+        // ~124 s hold of the last 0x2E level, whoever sent it: a level armed by someone
+        // else (the -FanCheck hold, CLI -Bios FanLevel, another tool) was kept alive for
+        // as long as the GUI ran, while it showed Auto and the BIOS curve never took over.
+        // So at the start and after a hand-back the GUI stays quiet until it writes a level
         public bool HeartbeatAllowed {
-            get { return this.Guard == null || this.Guard.HeartbeatAllowed; }
+            get {
+                if(this.Guard != null && !this.Guard.HeartbeatAllowed)
+                    return false;
+                if(this.Control != FanControlKind.Bios)
+                    return true;
+                return this.maxSet || (this.Guard != null && this.Guard.HoldsLevel);
+            }
         }
 
         public bool NeedsSupervision {
@@ -488,10 +504,21 @@ namespace OmenMon.Hardware.Platform {
             return Hw.BiosGet<bool>(this.Bios.GetMaxFan);
         }
 
-        // Sets the maximum fan speed status
+        // Sets the maximum fan speed status. BIOS-only: armed with a 0x10 first, since
+        // 0x27 [1] only takes effect while a 0x10 has armed the fans (8C77, measured) and
+        // the heartbeat no longer runs while OmenMon holds no level (whether 0x27 [0]
+        // needs it is not measured; the heartbeat gave it one too). Max Fan switched on
+        // here keeps the heartbeat going until it is switched off (HeartbeatAllowed)
         public void SetMax(bool flag) {
+            if(this.Control == FanControlKind.Bios)
+                ArmFanLevel(true);
             Hw.BiosSet(this.Bios.SetMaxFan, flag);
+            this.maxSet = flag;
         }
+
+        // Whether this OmenMon switched Max Fan on (0x27 [1]) and not off since. Not
+        // GetMax(): on 8BAC 0x26 reports both levels at the fan table's top row, whoever set them
+        private volatile bool maxSet;
 
         // Retrieves the current fan mode from the EC mode register, for display and to
         // compare with a wanted mode. A verified register: its mode, null while it shows
