@@ -499,12 +499,18 @@
                    block from 0x64 (the battery manufacturer name); 0x90-0x98 BMNN is the battery name (ModeReg 0x95
                    reads 0x44); the speed words 0xB0/0xB2 are temperatures (CTMP, EST3); 0xF4 has no field.
                    0x57 is the keyboard colour (Z04B), 0x58 battery flag bits, 0x59 OGHM (the thermal policy byte).
-                   0xD2/0xD3 is BAC0, the battery current, not a fan (issue #50's "tach at 0xD2"). -->
+                   0xD2/0xD3 is BAC0, the battery current, not a fan (issue #50's "tach at 0xD2").
+                 * Mode register: EC 0x59 (OGHM), verified from the F.20 tables and an acpiexec trace: the method
+                   behind BIOS 0x1A (GC1A) writes its data[1] verbatim into OGHM, then notifies NPCF; on AC it sets
+                   PL1/PL2/PL4 to 130/130/200 W if bit 0 is set, else 130/55/200 W, then SMI 0xDB. The trace of
+                   0x1A [FF 30] / [FF 31] / [FF 03] shows the EC 0x59 writes of 0x30 / 0x31 / 0x03. Live 0x59 reads
+                   0x00 until the first 0x1A since boot (shown as unknown, never sent). Live confirmation with the
+                   mode test is pending. -->
             <Model ProductId="8C77" DisplayName="HP Omen 16 (2024, wf1xxx, 8C77)">
                 <FanControl>Bios</FanControl>
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
-                <!-- <ModeReg Verified="true">89</ModeReg> pending: confirm 0x1A writes EC 0x59 on 8C77 (C3) -->
+                <ModeReg Verified="true">89</ModeReg>
             </Model>
             <!-- 8A25: HP Victus 16-d1xxx (2022, 12th gen Intel) — GetMaxFan=True sets 0xFF at 0x34/0x35; rate regs confirmed at 0x2E/0x2F; Fan2=Unsupported -->
             <Model ProductId="8A25" DisplayName="HP Victus 16 (2022, d1xxx)">

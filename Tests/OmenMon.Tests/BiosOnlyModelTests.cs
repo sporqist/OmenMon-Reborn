@@ -228,7 +228,43 @@ namespace OmenMon.Tests {
             Assert.Equal(FanControlKind.Bios, p.FanControl);
             Assert.Equal(0xB2, p.TempCpuReg);
             Assert.Equal(0xB4, p.TempGpuReg);
+            Assert.True(p.ModeRegVerified);
+            Assert.Equal(0x59, p.ModeReg);
             Assert.True(AutoCal.IsKnownBoard("8C77"));
+        }
+
+        // The shipped 8C77 entry through the session, on an image as measured (0x59 =
+        // 0x00: no 0x1A since boot; 0x95 = 0x44): GetMode() shows unknown until OmenMon
+        // sends a mode, 0x00 and 0x44 are never sent, 0x59 is read and never written
+        [Fact]
+        public void Shipped8C77_VerifiedOghm_SessionNeverSendsItsBootValue() {
+            File.Copy(ShippedConfig(), File_, true);
+            Config.Load();
+            PlatformPreset p = Config.Models["8C77"];
+
+            using var rig = new TestRig(preset: p);
+            BiosOnlySessionTests.Fill8C77Image(rig.Ec, 0x00);
+            rig.Bios.OnFanMode = m => rig.Ec.Data[0x59] = m;   // GC1A: OGHM = data[1]
+            rig.SetCpuTemperature(45);
+            rig.Ec.GpuTemperature = 48;
+            Assert.Null(rig.Platform.Fans.GetMode());
+            Assert.Null(rig.Platform.Fans.GetModeToReplay());
+            byte[] image = (byte[]) rig.Ec.Data.Clone();
+            rig.Ec.Reads.Clear();
+
+            List<(int, int)> coolOff = BiosOnlySessionTests.RunSession(new GuiSession(rig));
+
+            image[FakeEcRegisters.CpuTempRegister] = rig.Ec.Data[FakeEcRegisters.CpuTempRegister];
+            image[FakeEcRegisters.GpuTempRegister] = rig.Ec.Data[FakeEcRegisters.GpuTempRegister];
+            image[0x59] = rig.Ec.Data[0x59];
+            BiosOnlySessionTests.AssertBiosOnly(rig, image, coolOff, Array.Empty<byte>(),
+                FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister, 0x59);
+            Assert.DoesNotContain(rig.Bios.Calls, c => c.Type == 0x1A && c.Data[1] == 0x00);
+            Assert.NotNull(rig.Platform.Fans.GetMode());
+
+            // EC 0x14 (FWPM) keeps the last 0x2E level after it expired (measured on 8C77:
+            // 60 while the fans ran the curve at 34/37): stale, so never read
+            Assert.DoesNotContain((byte) 0x14, rig.Ec.Reads);
         }
 
         // T2: the shipped 8BAC entry is BIOS-only (temperature registers kept: CPU 0xB2,
