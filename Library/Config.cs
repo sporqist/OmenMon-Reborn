@@ -832,6 +832,28 @@ namespace OmenMon.Library {
             if(preset.IsBiosOnly && preset.ModeRegVerified)
                 preset.ModeReg = read(XmlElementModeReg, true, 0);
 
+            // Display-only temperatures: <DisplaySensor Name="CTMP">176</DisplaySensor>, a
+            // name of 1-8 letters or digits that the fan logic never looks up (not CPUT,
+            // GPTM or BIOS), once each, and a byte
+            foreach(XmlNode child in node.ChildNodes) {
+                XmlElement sensor = child as XmlElement;
+                if(!ok || sensor == null || sensor.Name != XmlElementDisplaySensor)
+                    continue;
+                string name = sensor.GetAttribute(XmlAttrDisplaySensorName).Trim();
+                string value = sensor.InnerText.Trim();
+                if(!DisplayTemperature.IsValidName(name)) {
+                    ok = false;
+                    why = "Model " + productId + ": <" + XmlElementDisplaySensor + "> name '" + name + "' is not 1-8 letters or digits, or is CPUT, GPTM or BIOS";
+                } else if(preset.DisplaySensors.Exists(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))) {
+                    ok = false;
+                    why = "Model " + productId + ": <" + XmlElementDisplaySensor + "> " + name + " is there twice";
+                } else if(!Conv.GetByte(value, out byte register)) {
+                    ok = false;
+                    why = "Model " + productId + ": <" + XmlElementDisplaySensor + "> " + name + " is '" + value + "', not a byte";
+                } else
+                    preset.DisplaySensors.Add(new OmenMon.Hardware.Platform.DisplaySensorEntry(name, register));
+            }
+
             if(!ok) {
                 problem = why;
                 return false;
@@ -1604,6 +1626,7 @@ namespace OmenMon.Library {
                     mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
                 if(p.ModeRegVerified && p.ModeReg != 0)
                     BuildModeReg(xml, mnode, p);
+                BuildDisplaySensors(xml, mnode, p);
                 return mnode;
             }
 
@@ -1629,7 +1652,20 @@ namespace OmenMon.Library {
                 mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
             BuildModeReg(xml, mnode, p);
             mnode.AppendChild(xml.CreateElement(XmlElementSwitchReg)).InnerText        = Conv.GetString((uint) p.SwitchReg, 1, 10);
+            BuildDisplaySensors(xml, mnode, p);
             return mnode;
+        }
+
+        // Adds a model's display-only temperatures
+        private static void BuildDisplaySensors(XmlDocument xml, XmlElement mnode, OmenMon.Hardware.Platform.PlatformPreset p) {
+            if(p.DisplaySensors == null)
+                return;
+            foreach(OmenMon.Hardware.Platform.DisplaySensorEntry entry in p.DisplaySensors) {
+                XmlElement sensor = xml.CreateElement(XmlElementDisplaySensor);
+                sensor.SetAttribute(XmlAttrDisplaySensorName, entry.Name);
+                sensor.InnerText = Conv.GetString((uint) entry.Register, 1, 10);
+                mnode.AppendChild(sensor);
+            }
         }
 
         // Adds a model's <ModeReg>, marked Verified="true" if it is

@@ -650,6 +650,8 @@ namespace OmenMon.Library {
         private const string XmlElementTempGpuReg       = "TempGpuReg";
         private const string XmlElementModeReg          = "ModeReg";
         private const string XmlAttrModeRegVerified     = "Verified";
+        private const string XmlElementDisplaySensor    = "DisplaySensor";
+        private const string XmlAttrDisplaySensorName   = "Name";
         private const string XmlElementSwitchReg        = "SwitchReg";
         private const string XmlElementFanControl       = "FanControl";
         private const string XmlFanControlBios          = "Bios";

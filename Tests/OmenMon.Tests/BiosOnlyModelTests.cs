@@ -110,6 +110,8 @@ namespace OmenMon.Tests {
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
                 <ModeReg Verified=""true"">89</ModeReg>
+                <DisplaySensor Name=""SKTB"">179</DisplaySensor>
+                <DisplaySensor Name=""CATT"">167</DisplaySensor>
             </Model>
             <!-- an unverified mode register on a BIOS-only board is ignored -->
             <Model ProductId=""BIO2"" DisplayName=""BIOS-only board, unverified mode register"">
@@ -119,6 +121,15 @@ namespace OmenMon.Tests {
             <Model ProductId=""BAD4"" DisplayName=""Verified is not a bool"">
                 <FanControl>Bios</FanControl>
                 <ModeReg Verified=""maybe"">89</ModeReg>
+            </Model>
+            <Model ProductId=""BAD5"" DisplayName=""display sensor with a control name"">
+                <FanControl>Bios</FanControl>
+                <DisplaySensor Name=""CPUT"">179</DisplaySensor>
+            </Model>
+            <Model ProductId=""BAD6"" DisplayName=""display sensor twice"">
+                <FanControl>Bios</FanControl>
+                <DisplaySensor Name=""SKTB"">179</DisplaySensor>
+                <DisplaySensor Name=""SKTB"">180</DisplaySensor>
             </Model>
         </Models>
     </Config>
@@ -150,6 +161,8 @@ namespace OmenMon.Tests {
             Assert.True(Config.Models["8BAC"].ModeRegVerified);
             Assert.Equal(0x59, Config.Models["8BAC"].ModeReg);
             Assert.False(Config.Models["BIO2"].ModeRegVerified);
+            Assert.Equal(new[] { ("SKTB", (byte) 0xB3), ("CATT", (byte) 0xA7) },
+                Config.Models["8BAC"].DisplaySensors.Select(s => (s.Name, s.Register)).ToArray());
             Assert.Equal(0, Config.Models["BIO2"].ModeReg);
 
             // Unchanged: the file stays as it is
@@ -171,6 +184,8 @@ namespace OmenMon.Tests {
             Config.Save();
             string oghm = Regex.Match(File.ReadAllText(File_), @"<Model ProductId=""8BAC""[\s\S]*?</Model>").Value;
             Assert.Contains("<ModeReg Verified=\"true\">89</ModeReg>", oghm);
+            Assert.Contains("<DisplaySensor Name=\"SKTB\">179</DisplaySensor>", oghm);
+            Assert.Contains("<DisplaySensor Name=\"CATT\">167</DisplaySensor>", oghm);
             Config.Models["8BAC"].DisplayName = "BIOS-only board with OGHM";
             Config.Save();
             saved = File.ReadAllText(File_);
@@ -196,16 +211,26 @@ namespace OmenMon.Tests {
             Assert.False(Config.Models.ContainsKey("BAD2"));
             Assert.False(Config.Models.ContainsKey("BAD3"));
             Assert.False(Config.Models.ContainsKey("BAD4"));
+            Assert.False(Config.Models.ContainsKey("BAD5"));
+            Assert.False(Config.Models.ContainsKey("BAD6"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD1") && p.Contains("SwitchReg") && p.Contains("missing"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD2") && p.Contains("FanLevelReg1") && p.Contains("0xZZ"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD3") && p.Contains("Smm"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD4") && p.Contains("Verified") && p.Contains("maybe"));
-            Assert.Equal(4, Config.ModelLoadProblems.Count);
+            Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD5") && p.Contains("CPUT"));
+            Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD6") && p.Contains("twice"));
+            Assert.Equal(6, Config.ModelLoadProblems.Count);
 
             Config.Save();
             string text = File.ReadAllText(File_);
             Assert.Contains("ProductId=\"BAD1\"", text);
             Assert.Contains("<FanLevelReg1>0xZZ</FanLevelReg1>", text);
+        }
+
+        // The registers a session may read on a model: the given ones and its display-only
+        // temperatures
+        private static byte[] Readable(PlatformPreset p, params byte[] registers) {
+            return registers.Concat(p.DisplaySensors.Select(s => s.Register)).ToArray();
         }
 
         // The shipped OmenMon.xml, loaded as the application loads it
@@ -258,7 +283,7 @@ namespace OmenMon.Tests {
             image[FakeEcRegisters.GpuTempRegister] = rig.Ec.Data[FakeEcRegisters.GpuTempRegister];
             image[0x59] = rig.Ec.Data[0x59];
             BiosOnlySessionTests.AssertBiosOnly(rig, image, coolOff, Array.Empty<byte>(),
-                FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister, 0x59);
+                Readable(p, FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister, 0x59));
             Assert.DoesNotContain(rig.Bios.Calls, c => c.Type == 0x1A && c.Data[1] == 0x00);
             Assert.NotNull(rig.Platform.Fans.GetMode());
 
@@ -302,7 +327,7 @@ namespace OmenMon.Tests {
             image[FakeEcRegisters.GpuTempRegister] = rig.Ec.Data[FakeEcRegisters.GpuTempRegister];
             image[0x59] = rig.Ec.Data[0x59];
             BiosOnlySessionTests.AssertBiosOnly(rig, image, coolOff, new byte[] { 0x01 },
-                FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister, 0x59);
+                Readable(p, FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister, 0x59));
             Assert.Contains(rig.Bios.Calls, c => c.Type == 0x1A && c.Data[1] == 0x01);
         }
 

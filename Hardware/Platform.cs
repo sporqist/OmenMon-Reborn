@@ -315,7 +315,7 @@ namespace OmenMon.Hardware.Platform {
                     else
                         sensors[k] = new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, bios);
                 }
-                return sensors;
+                return WithDisplaySensors(preset, sensors, ref use, registers);
             }
 
             // Per-model temperature-register overrides come from the preset resolved in
@@ -375,8 +375,27 @@ namespace OmenMon.Hardware.Platform {
 
             }
 
-            return temperature;
+            return WithDisplaySensors(preset, temperature, ref use, registers);
 
+        }
+
+        // Appends the model's display-only temperatures (DisplayTemperature): after the
+        // others, never used for the maximum temperature (use false), and under names the
+        // fan logic never looks up
+        private static IPlatformReadComponent[] WithDisplaySensors(PlatformPreset preset,
+            IPlatformReadComponent[] sensors, ref bool[] use, IEcRegisters registers) {
+            if(preset.DisplaySensors == null || preset.DisplaySensors.Count == 0)
+                return sensors;
+            var all = new List<IPlatformReadComponent>(sensors);
+            var allUse = new List<bool>(use);
+            foreach(DisplaySensorEntry entry in preset.DisplaySensors) {
+                if(!DisplayTemperature.IsValidName(entry.Name))
+                    continue;
+                all.Add(new DisplayTemperatureComponent(entry.Name, entry.Register, registers));
+                allUse.Add(false);
+            }
+            use = allUse.ToArray();
+            return all.ToArray();
         }
 #endregion
 

@@ -449,6 +449,34 @@ namespace OmenMon.Hardware.Platform {
 
     }
 
+    // A model's extra temperature, for display only (DisplayTemperature): an EC register
+    // shown under its ACPI name. GetValue() is the temperature, or DisplayTemperature.Invalid
+    // for a failed read or a value outside 1-120 °C. It never has a valid reading
+    // (GetReading() stays None), so even code that asked it would get nothing to act on;
+    // Platform also leaves it out of the maximum temperature.
+    public sealed class DisplayTemperatureComponent : EcComponent {
+
+        public DisplayTemperatureComponent(string name, byte register, IEcRegisters registers = null)
+            : base(register, PlatformData.AccessType.Read, PlatformData.DataSize.Byte, int.MaxValue, registers) {
+            SetName(name);
+            this.LastValue = DisplayTemperature.Invalid;
+            this.PreviousValue = DisplayTemperature.Invalid;
+        }
+
+        public override bool Update() {
+            bool ok = TryReadRegister(out int value);
+            this.PreviousValue = this.LastValue;
+            this.LastValue = DisplayTemperature.Shown(ok, value);
+            return ok;
+        }
+
+        // Never a reading for the fan logic
+        protected override bool IsValidValue(int value) {
+            return false;
+        }
+
+    }
+
     // A mode register verified to hold what BIOS 0x1A last sent (the model entry's
     // <ModeReg Verified="true">; 8BAC and 8C77: EC 0x59 OGHM, which the ACPI method behind
     // 0x1A writes verbatim). Read only: the mode is set through the BIOS, never the EC.

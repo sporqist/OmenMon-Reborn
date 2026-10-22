@@ -473,12 +473,21 @@
                  Mode register: EC 0x59 (OGHM), verified from the ACPI tables: the method behind BIOS 0x1A (GC1A)
                  writes its data[1] verbatim into OGHM, notifies NPCF and, on AC, sets the power limits from bit 0;
                  nothing else writes it. So 0x59 reads the mode last sent, and a mode read from it may be sent again
-                 (a program's restore, constant speed). 0x00 there means no 0x1A since boot (shown as unknown). -->
+                 (a program's restore, constant speed). 0x00 there means no 0x1A since boot (shown as unknown).
+                 Display-only temperatures (shown, fed into nothing; CPU, GPU and BIOS 0x23 stay the safety sources),
+                 under their names in the 8BAC ACPI field list: 0xB0 CTMP, 0xB3 SKTB, 0xB6 EST1, 0xB7 EST2 (board),
+                 0xA7 CATT. The same fields read as real temperatures on 8C77 (see there); 0xB5 DPOT reads 0 there
+                 and is left out. -->
             <Model ProductId="8BAC" DisplayName="HP Omen 16 (2023, wf0xxx, 8BAC)">
                 <FanControl>Bios</FanControl>
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
                 <ModeReg Verified="true">89</ModeReg>
+                <DisplaySensor Name="CTMP">176</DisplaySensor>
+                <DisplaySensor Name="SKTB">179</DisplaySensor>
+                <DisplaySensor Name="EST1">182</DisplaySensor>
+                <DisplaySensor Name="EST2">183</DisplaySensor>
+                <DisplaySensor Name="CATT">167</DisplaySensor>
             </Model>
             <!-- 8C77: HP OMEN 16 (2024, wf1xxx), BIOS F.20. BIOS fan control only: no EC fan register is read or written.
                  Measured on the board (2026-10-21/22, fan test, ear test, ACPI tables via acpiexec, cross-checked live):
@@ -505,12 +514,22 @@
                    PL1/PL2/PL4 to 130/130/200 W if bit 0 is set, else 130/55/200 W, then SMI 0xDB. The trace of
                    0x1A [FF 30] / [FF 31] / [FF 03] shows the EC 0x59 writes of 0x30 / 0x31 / 0x03. Live 0x59 reads
                    0x00 until the first 0x1A since boot (shown as unknown, never sent). Live confirmation with the
-                   mode test is pending. -->
+                   mode test is pending.
+                 * Display-only temperatures (shown, fed into nothing), names from the 8C77 F.20 tables, measured as
+                   real temperatures under an 80 W GPU load (idle -> max, r against NVML): 0xB0 CTMP (= 0xB1 CTML)
+                   65->82 r 0.93; 0xB3 SKTB 55->84 r 0.97; 0xB6 EST1 46->53 r 0.84; 0xB7 EST2 (board) 44->51 r 0.83;
+                   0xA7 CATT 63->77 r 0.81. 0xB5 DPOT reads 0 (left out). 0xC6 is BPV0, the battery voltage, and
+                   EC 0x14 (FWPM) keeps the last 0x2E level after it expired: neither is a temperature or a speed. -->
             <Model ProductId="8C77" DisplayName="HP Omen 16 (2024, wf1xxx, 8C77)">
                 <FanControl>Bios</FanControl>
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
                 <ModeReg Verified="true">89</ModeReg>
+                <DisplaySensor Name="CTMP">176</DisplaySensor>
+                <DisplaySensor Name="SKTB">179</DisplaySensor>
+                <DisplaySensor Name="EST1">182</DisplaySensor>
+                <DisplaySensor Name="EST2">183</DisplaySensor>
+                <DisplaySensor Name="CATT">167</DisplaySensor>
             </Model>
             <!-- 8A25: HP Victus 16-d1xxx (2022, 12th gen Intel) — GetMaxFan=True sets 0xFF at 0x34/0x35; rate regs confirmed at 0x2E/0x2F; Fan2=Unsupported -->
             <Model ProductId="8A25" DisplayName="HP Victus 16 (2022, d1xxx)">

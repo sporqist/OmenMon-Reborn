@@ -99,6 +99,47 @@ namespace OmenMon.Core {
 
     }
 
+    // A model's extra temperatures, for display only: named EC registers (the ACPI field
+    // names, e.g. CTMP, SKTB, EST1, EST2, CATT) shown next to the others. They feed
+    // nothing: not the maximum that drives the fans, not thermal panic, not the fan
+    // programs, not the fan-safety guard (CPU, GPU and BIOS 0x23 stay the safety
+    // sources). A value outside 1-120 °C is shown as invalid, never as a temperature.
+    public static class DisplayTemperature {
+
+        public const int MinValid = 1;
+        public const int MaxValid = 120;
+
+        // What an invalid value (or a failed read) is shown as
+        public const int Invalid = -1;
+
+        public static bool IsValid(int celsius) {
+            return celsius >= MinValid && celsius <= MaxValid;
+        }
+
+        // What is shown for a read: the temperature, or Invalid
+        public static int Shown(bool readOk, int value) {
+            return readOk && IsValid(value) ? value : Invalid;
+        }
+
+        // The names the fan logic looks sensors up by: a display sensor must never have
+        // one of them (it would then feed the CPU, GPU or BIOS reading)
+        private static readonly string[] Reserved = { "CPUT", "GPTM", "BIOS" };
+
+        // A name is 1-8 letters or digits and not reserved
+        public static bool IsValidName(string name) {
+            if(string.IsNullOrEmpty(name) || name.Length > 8)
+                return false;
+            foreach(char c in name)
+                if(!(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9'))
+                    return false;
+            foreach(string reserved in Reserved)
+                if(string.Equals(name, reserved, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            return true;
+        }
+
+    }
+
     // Where a temperature reading comes from
     public enum TemperatureSource {
         Bios,       // BIOS 0x23

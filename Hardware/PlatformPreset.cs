@@ -9,6 +9,16 @@ using OmenMon.Hardware.Ec;
 
 namespace OmenMon.Hardware.Platform {
 
+    // One display-only temperature of a model: its name (the ACPI field name) and register
+    public sealed class DisplaySensorEntry {
+        public string Name;
+        public byte Register;
+        public DisplaySensorEntry(string name, byte register) {
+            this.Name = name;
+            this.Register = register;
+        }
+    }
+
     // Defines the EC register layout for a specific device model
     public class PlatformPreset {
 
@@ -64,6 +74,12 @@ namespace OmenMon.Hardware.Platform {
         // <Temperature> config" — leaves every existing model entry unaffected.
         public byte TempCpuReg = 0;
         public byte TempGpuReg = 0;
+
+        // Extra temperatures for display only (<DisplaySensor Name="CTMP">176</DisplaySensor>):
+        // EC registers under their ACPI names, shown and fed into nothing (see
+        // DisplayTemperature). Any model kind; none by default.
+        public System.Collections.Generic.List<DisplaySensorEntry> DisplaySensors =
+            new System.Collections.Generic.List<DisplaySensorEntry>();
 
         // How the fans are controlled (<FanControl>Bios</FanControl> in the model entry).
         // Ec, the default, uses the fan registers above as before. Bios uses none of them:

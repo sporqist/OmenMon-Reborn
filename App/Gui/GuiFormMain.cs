@@ -650,9 +650,13 @@ namespace OmenMon.AppGui {
             string captionLocaleId = Config.L_GUI_MAIN + Gui.G_TMP + captionOriginal;
             string captionLocalized = Config.Locale.Get(captionLocaleId);
 
-            // Locate the pertinent caption label
-            Label label = ((Label) this.GrpTmp.Controls.Find(
-                Gui.T_LBL + Gui.G_TMP + indexString + Gui.S_CAP, false)[0]);
+            // Locate the pertinent caption label (the form has a fixed number of them:
+            // sensors past the last one are not shown)
+            Control[] found = this.GrpTmp.Controls.Find(
+                Gui.T_LBL + Gui.G_TMP + indexString + Gui.S_CAP, false);
+            if(found.Length == 0)
+                return;
+            Label label = (Label) found[0];
 
             // Also locate the value label
             Label labelValue =
@@ -995,8 +999,11 @@ namespace OmenMon.AppGui {
             int value = s.TempValue[index];
             PlatformData.ValueTrend valueTrend = s.TempTrend[index];
 
-            // Locate the pertinent labels
-            Label labelCaption = ((Label) this.GrpTmp.Controls.Find(prefix + Gui.S_CAP, false)[0]);
+            // Locate the pertinent labels (none past the form's last one)
+            Control[] found = this.GrpTmp.Controls.Find(prefix + Gui.S_CAP, false);
+            if(found.Length == 0)
+                return;
+            Label labelCaption = (Label) found[0];
             Label labelValue = ((Label) this.GrpTmp.Controls[this.GrpTmp.Controls.IndexOf(labelCaption) + 1]);
 
             // Update the status
@@ -1008,8 +1015,8 @@ namespace OmenMon.AppGui {
             string tempUnit = Config.TemperatureUseFahrenheit
                 ? "°F" : Config.Locale.Get(Config.L_UNIT + "Temperature" + Config.LS_CUSTOM_FONT);
 
-            // Update the value
-            labelValue.Text = value == 0 ? "" :
+            // Update the value (a display-only sensor reading outside 1-120 °C: "--")
+            labelValue.Text = value < 0 ? "--" : value == 0 ? "" :
                 displayValue.ToString() + tempUnit
                 + (valueTrend == PlatformData.ValueTrend.Unchanged ?
                     Conv.GetChar(Conv.SpecialChar.SpaceEn) : valueTrend == PlatformData.ValueTrend.Ascending ?
