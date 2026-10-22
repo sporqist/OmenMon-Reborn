@@ -551,6 +551,20 @@ namespace OmenMon.AppCli {
                     ExitGui(exitWait);
                     break;
 
+                // BIOS-only fan check: steps through the fan-safety guard, 0x2D every
+                // second, a report and a CSV: -FanCheck [<File.csv>]
+                case "-fancheck":
+                    Cli.PrintContext(Config.Locale.Get(Config.L_CLI + "FanCheck"), "-FanCheck");
+                    string fanCheckFile = null;
+                    if(i + 1 < args.Length && !args[i + 1].StartsWith("-"))
+                        fanCheckFile = args[++i];
+                    if(i + 1 < args.Length && !args[i + 1].StartsWith("-")) {
+                        App.Error("ErrArgUnknown");
+                        goto showUsage; // Interrupt the context loop
+                    }
+                    FanCheckRun(fanCheckFile);
+                    break;
+
                 // GPU log: per app dGPU engine time and VRAM over time, to a CSV file
                 case "-gpulog":
                     Cli.PrintContext(Config.Locale.Get(Config.L_CLI + "GpuLog"), "-GpuLog");

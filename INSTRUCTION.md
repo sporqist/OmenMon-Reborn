@@ -245,6 +245,7 @@ OmenMon.exe [mode] [options]
 | `-Graphics Apply <Profile\|Default>` | Set a profile's per-app GPU preferences, or `Default` to give every managed app its original back. Prints the apps that take the change when they start again; restarts nothing. Exit OmenMon first |
 | `-Graphics Restore` | Same as `-Graphics Apply Default`; use before uninstalling |
 | `-Graphics Adopt <Profile> [<File.reg>]` | Make a profile of the GPU preferences set now, with the originals from a `.reg` export of `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` (without one: their values now). Changes nothing in the registry |
+| `-FanCheck [<file.csv>]` | BIOS-only boards (8BAC, 8C77): check that the fans follow the levels. Five steps (20/23, 30/33, 40/43, 50/53, 60/63, capped at the BIOS fan table's top row; never 0/0 or 255) of 20 s each, every write through the fan-safety guard with a 0x10 keep-alive; BIOS 0x2D is read every second. Prints per step and fan the rise time, the settled value and the jitter, and saves the samples with the temperatures (default `OmenMon-FanCheck-<yyyyMMdd-HHmmss>.csv`). Stops at 85 °C or when the temperature stops reading (the fans go to the table maximum), Ctrl+C stops it, and it always hands the fans back to the BIOS. Needs administrator rights; OmenMon itself must not run. Boards with EC fan registers keep the calibration wizard |
 | `-GpuLog [<seconds>] [<file.csv>]` | Measure which apps use the discrete GPU while another runs (e.g. TouchDesigner). See [GPU Log](#gpu-log) |
 
 ---

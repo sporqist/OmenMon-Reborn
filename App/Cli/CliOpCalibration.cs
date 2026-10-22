@@ -422,7 +422,7 @@ namespace OmenMon.AppCli {
             if(BiosFanControl.CalibrationAllowed(model, running))
                 return null;
             if(model == FanControlKind.Bios || running == FanControlKind.Bios)
-                return "Fan speed on this board comes from the BIOS (0x2D x 100); no calibration needed.";
+                return "Fan speed on this board comes from the BIOS (0x2D x 100); no calibration needed. To check that the fans follow the levels: OmenMon -FanCheck (with OmenMon itself not running).";
             return "This board (" + (productId ?? "?") + ") has no verified EC map. The calibration wizard writes EC registers, so it does not run here; please report the board with 'Copy Diagnostic Info' instead.";
         }
 

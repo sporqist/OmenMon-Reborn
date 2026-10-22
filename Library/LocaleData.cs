@@ -112,6 +112,9 @@ namespace OmenMon.Library.Locale {
                 // CLI: GPU log
                 ["CliGpuLog"] = "GPU Log",
 
+                // CLI: BIOS-only fan check
+                ["CliFanCheck"] = "Fan Check",
+
                 // CLI: Usage
                 ["CliUsage"] = "Usage Information",
                 ["CliUsageText"] =
@@ -128,6 +131,9 @@ namespace OmenMon.Library.Locale {
                     "  -EcoPlus Restore          Restore everything Eco+ changed (OmenMon must not be running; for uninstalling)" + Environment.NewLine +
                     "  -Exit [<Seconds>]         Ask the running OmenMon to exit as its tray Exit does (fans back to the BIOS," + Environment.NewLine +
                     "                            Eco+ restored) and wait for it, 30 s by default; needs administrator rights" + Environment.NewLine +
+                    "  -FanCheck [<File.csv>]    BIOS-only boards: run the fans through 5 levels (20/23 to 60/63, 20 s each, through" + Environment.NewLine +
+                    "                            the fan-safety guard), read the BIOS speed every second, print a report and save the" + Environment.NewLine +
+                    "                            samples; stops at 85 C, then hands the fans back to the BIOS (OmenMon must not run)" + Environment.NewLine +
                     "  -Graphics                 List the graphics app profiles and the apps whose GPU preference OmenMon manages" + Environment.NewLine +
                     "  -Graphics Apply <Profile> Set the GPU preferences of a profile, or Default for every app as it was" + Environment.NewLine +
                     "                            (OmenMon must not be running; apps take the change when they start again)" + Environment.NewLine +
