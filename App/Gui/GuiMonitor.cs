@@ -29,7 +29,7 @@ namespace OmenMon.AppGui {
         public readonly int[] FanLevel;
         public readonly int[] FanRate;
         public int Countdown;
-        public BiosData.FanMode Mode;
+        public BiosData.FanMode? Mode;  // null: unknown (a BIOS-only board before OmenMon sent one)
         public bool Max;
         public bool Off;
 
@@ -291,8 +291,9 @@ namespace OmenMon.AppGui {
             s.MaxTemp = plat.GetMaxTemperature(false); // temps already refreshed above
 
             // The dynamic-icon warm/cool background needs the fan mode even with the form
-            // hidden, so it is always sampled.
-            s.Mode = plat.Fans.GetMode();
+            // hidden, so it is always sampled. A BIOS-only board has no mode register: it
+            // shows the last mode OmenMon sent (display only, never sent back)
+            s.Mode = plat.Fans.GetMode() ?? plat.Fans.LastModeSent;
 
             // Cheap state (no EC except the BIOS-on-battery branch of IsFullPowerConfirmed)
             s.ProgramEnabled   = op.Program.IsEnabled;
@@ -453,14 +454,11 @@ namespace OmenMon.AppGui {
             // Constant-speed countdown maintenance — replaces the RdoFanConst-gated logic
             // that used to live in GuiFormMain.UpdateFan (it ran on the UI thread). The
             // form now just sets Op.ConstantSpeedActive.
+            // (FanActions.MaintainConstantSpeed: EC models only; never re-sends a mode
+            // read back from the EC)
             if(op.ConstantSpeedActive) {
-                lock(op.HardwareLock) {
-                    int countdown = op.Platform.Fans.GetCountdown();
-                    if(countdown < Config.UpdateMonitorInterval + Config.FanCountdownExtendThreshold) {
-                        op.Platform.Fans.SetMode(op.Platform.Fans.GetMode());
-                        op.Platform.Fans.SetCountdown(Config.FanCountdownExtendInterval);
-                    }
-                }
+                lock(op.HardwareLock)
+                    FanActions.MaintainConstantSpeed(op.Platform.Fans);
             }
 
             // Sensor sampling + snapshot publication + thermal-panic safety net.

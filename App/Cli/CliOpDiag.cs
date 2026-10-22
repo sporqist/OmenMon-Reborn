@@ -2,6 +2,7 @@
  //  \\  Copyright © 2023-2024 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 // OmenMon-Reborn additions © 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 // One-shot diagnostic dump. Bundles everything the maintainer needs to
 // triage a bug report — model identity, BIOS capabilities, EC snapshot,
@@ -161,14 +162,19 @@ namespace OmenMon.AppCli {
         private static void DiagModelPreset(StringBuilder sb) {
             sb.AppendLine("## Model Database Match");
             sb.AppendLine();
+            lock(Config.ModelLoadProblems)
+                foreach(string problem in Config.ModelLoadProblems)
+                    sb.AppendLine($"- Model entry not loaded: {problem}");
             try {
                 string productId = new Settings().GetProduct() ?? "?";
                 sb.AppendLine($"- Detected ProductId: `{productId}`");
                 if(Config.Models != null && Config.Models.TryGetValue(productId, out PlatformPreset preset)) {
                     sb.AppendLine($"- Native preset: **{preset.DisplayName ?? "(no DisplayName)"}**");
+                    sb.AppendLine($"- Fan control: `{preset.FanControl}`" + (preset.IsBiosOnly ? " (the EC fan registers below are not used)" : ""));
                     sb.AppendLine();
                     sb.AppendLine("| Register | Value (dec) | Value (hex) |");
                     sb.AppendLine("|----------|-------------|-------------|");
+                    if(!preset.IsBiosOnly) {
                     AppendPresetRow(sb, "FanLevelReg0",     preset.FanLevelReg0);
                     AppendPresetRow(sb, "FanLevelReg1",     preset.FanLevelReg1);
                     AppendPresetRow(sb, "FanRateReadReg0",  preset.FanRateReadReg0);
@@ -181,6 +187,7 @@ namespace OmenMon.AppCli {
                     AppendPresetRow(sb, "ManualReg",        preset.ManualReg);
                     AppendPresetRow(sb, "ModeReg",          preset.ModeReg);
                     AppendPresetRow(sb, "SwitchReg",        preset.SwitchReg);
+                    }
                     if(preset.TempCpuReg != 0) AppendPresetRow(sb, "TempCpuReg", preset.TempCpuReg);
                     if(preset.TempGpuReg != 0) AppendPresetRow(sb, "TempGpuReg", preset.TempGpuReg);
                 } else {
@@ -227,7 +234,10 @@ namespace OmenMon.AppCli {
                 var platform = new Platform();
                 var fans = platform.Fans;
 
-                sb.AppendLine($"- Mode: `{fans.GetMode()}`, Manual: `{fans.GetManual()}`, Max: `{fans.GetMax()}`, Off: `{fans.GetOff()}`, Countdown: `{fans.GetCountdown()}` s");
+                sb.AppendLine($"- Fan control: `{fans.Control}`" + (fans.Control == OmenMon.Core.FanControlKind.Bios ? " (no EC fan register is read or written; RPM = BIOS level x 100)" : ""));
+                sb.AppendLine($"- Mode: `{(fans.GetMode()?.ToString() ?? "unknown")}`, Manual: `{fans.GetManual()}`, Max: `{fans.GetMax()}`, Off: `{fans.GetOff()}`, Countdown: `{fans.GetCountdown()}` s");
+                foreach(string refused in AbsentComponent.Refused)
+                    sb.AppendLine($"- Refused EC write: {refused}");
                 sb.AppendLine();
                 sb.AppendLine("| Fan | Level [krpm] | Rate [%] | Speed [rpm] | RPM source |");
                 sb.AppendLine("|-----|--------------|----------|-------------|------------|");
@@ -241,7 +251,9 @@ namespace OmenMon.AppCli {
                     // Describe where the RPM came from, mirroring Fan.GetSpeed()'s
                     // resolution order (AutoCal override → preset EC speed register).
                     string source = "preset EC speed register";
-                    try {
+                    if(fans.Control == OmenMon.Core.FanControlKind.Bios)
+                        source = "BIOS level x 100 (BIOS-only model)";
+                    else try {
                         byte reg = 0;
                         EcDiffScanner.Mode mode = default(EcDiffScanner.Mode);
                         int mul = 0;

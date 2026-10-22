@@ -21,6 +21,9 @@ namespace OmenMon.Tests.Fakes {
 
         public List<(byte Register, byte Value)> Writes { get; } = new List<(byte, byte)>();
 
+        // Every register read (a word read records both bytes)
+        public HashSet<byte> Reads { get; } = new HashSet<byte>();
+
         public byte CpuTemperature {
             get { return this.Data[CpuTempRegister]; }
             set { this.Data[CpuTempRegister] = value; }
@@ -36,6 +39,7 @@ namespace OmenMon.Tests.Fakes {
                 value = 0;
                 return false;
             }
+            this.Reads.Add(register);
             value = this.Data[register];
             return true;
         }
@@ -45,6 +49,8 @@ namespace OmenMon.Tests.Fakes {
                 value = 0;
                 return false;
             }
+            this.Reads.Add(register);
+            this.Reads.Add((byte) (register + 1));
             value = (ushort) (this.Data[register] | (this.Data[(byte) (register + 1)] << 8));
             return true;
         }

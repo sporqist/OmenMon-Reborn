@@ -321,16 +321,9 @@ namespace OmenMon.AppGui {
                 return;
 
             // Serialise the fan-control writes with the monitor thread
-            lock(Context.Op.HardwareLock) {
-
-                // Clear fan-off latch before enabling max so the BIOS will honour SetMax
-                if(enableMax && Context.Op.Platform.Fans.GetOff())
-                    Context.Op.Platform.Fans.SetOff(false);
-
-                // Toggle the maximum fan speed
-                Context.Op.Platform.Fans.SetMax(enableMax);
-
-            }
+            // (FanActions holds the sequence, so the tests run what the menu sends)
+            lock(Context.Op.HardwareLock)
+                FanActions.ToggleMax(Context.Op.Platform.Fans, enableMax);
 
             // Publish a fresh snapshot so the open form + menu reflect the change at once
             Context.Monitor?.SampleNow();
@@ -349,7 +342,7 @@ namespace OmenMon.AppGui {
 
             // Toggle the fan on or off
             lock(Context.Op.HardwareLock)
-                Context.Op.Platform.Fans.SetOff(!((ToolStripMenuItem) sender).Checked);
+                FanActions.ToggleOff(Context.Op.Platform.Fans, !((ToolStripMenuItem) sender).Checked);
 
             // Publish a fresh snapshot so the open form + menu reflect the change at once
             Context.Monitor?.SampleNow();

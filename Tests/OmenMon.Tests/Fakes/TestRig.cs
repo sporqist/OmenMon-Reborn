@@ -24,6 +24,8 @@ namespace OmenMon.Tests.Fakes {
     // FakeEmbeddedController, which is then Hw.Ec until the rig is disposed. With
     // fanArrayBios, the fan array calls the BIOS through what it returns for BiosCtl
     // (a recorder in SafeLevelBoundaryTests); everything else uses BiosCtl directly.
+    // With preset, the fan array is the one production builds for that model
+    // (Platform.CreateFanArray, e.g. a BIOS-only model) and the platform carries it.
     public sealed class TestRig : IDisposable {
 
         public Fake8BacBios Bios { get; } = new Fake8BacBios();
@@ -42,7 +44,7 @@ namespace OmenMon.Tests.Fakes {
         private readonly IEmbeddedController? savedEc;
         private readonly int savedEcWaitSpinCount;
 
-        public TestRig(bool ecDriver = false, Func<IBiosCtl, IBiosCtl>? fanArrayBios = null) {
+        public TestRig(bool ecDriver = false, Func<IBiosCtl, IBiosCtl>? fanArrayBios = null, PlatformPreset? preset = null) {
 
             Hw.Isolated = true;
             Config.LocaleInit();
@@ -85,7 +87,9 @@ namespace OmenMon.Tests.Fakes {
                 new EcComponent(p.FanSpeedReg1, R, PlatformData.DataSize.Word, int.MaxValue, this.Ec),
                 this.BiosCtl);
 
-            this.Fans = new FanArray(new IFan[] { cpu, gpu },
+            this.Fans = preset != null
+                ? Platform.CreateFanArray(preset, this.Ec, fanArrayBios != null ? fanArrayBios(this.BiosCtl) : this.BiosCtl)
+                : new FanArray(new IFan[] { cpu, gpu },
                 new EcComponent(p.CountdownReg, RW, B, int.MaxValue, this.Ec),
                 new EcComponent(p.ManualReg, RW, B, int.MaxValue, this.Ec),
                 new EcComponent(p.ModeReg, RW, B, int.MaxValue, this.Ec),
@@ -100,7 +104,8 @@ namespace OmenMon.Tests.Fakes {
 
             this.Platform = new Platform(this.Settings, this.Fans,
                 new IPlatformReadComponent[] { cput, gptm, bios },
-                new bool[] { true, true, false });
+                new bool[] { true, true, false },
+                preset);
 
         }
 

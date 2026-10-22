@@ -114,11 +114,14 @@ namespace OmenMon.Hardware.Platform {
 
         // The preset to show for the BIOS mode currently reported. The last preset
         // applied wins if its mode matches (Eco and Quiet share mode 3); otherwise the
-        // preset named after the mode, or null if no preset uses it.
-        public static PerformancePreset? ForMode(BiosData.FanMode mode, PerformancePreset? lastApplied) {
-            if(lastApplied.HasValue && Resolve(lastApplied.Value).FanMode == mode)
+        // preset named after the mode, or null if no preset uses it. An unknown mode
+        // (null) shows no preset.
+        public static PerformancePreset? ForMode(BiosData.FanMode? mode, PerformancePreset? lastApplied) {
+            if(!mode.HasValue)
+                return null;
+            if(lastApplied.HasValue && Resolve(lastApplied.Value).FanMode == mode.Value)
                 return lastApplied;
-            switch(mode) {
+            switch(mode.Value) {
                 case BiosData.FanMode.LegacyQuiet:
                     return PerformancePreset.Quiet;
                 case BiosData.FanMode.Default:

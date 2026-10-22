@@ -384,110 +384,21 @@ namespace OmenMon.AppGui {
                 // reconfigure; it is re-evaluated from the resulting radio state below
                 Context.Op.ConstantSpeedActive = false;
 
-                // Enable fan program
-                if(program != null) {
-
-                    if(isFanOff) // Re-enable fan if off first
-                        Context.Op.Platform.Fans.SetOff(false);
-
-                    if(isFanMax) // Disable maximum speed first
-                        Context.Op.Platform.Fans.SetMax(false);
-
-                    // Start the selected program
-                    Context.Op.Program.Run(program);
-
-                // Switch off the fan
-                } else if(this.RdoFanOff.Checked) {
-
-                    // Terminate any running fan program
-                    Context.Op.Program.Terminate();
-
-                    if(!isFanOff) { // Skip if already off
-
-                        if(isFanMax) // Disable maximum speed first
-                            Context.Op.Platform.Fans.SetMax(false);
-
-                        // Switch off the fan
-                        Context.Op.Platform.Fans.SetOff(true);
-
-                    }
-
-                // Set fan to maximum speed
-                } else if(this.RdoFanMax.Checked) {
-
-                    // Terminate any running fan program
-                    Context.Op.Program.Terminate();
-
-                    if(!isFanMax) { // Skip if already maximum speed
-
-                        if(isFanOff) // Re-enable fan if off first
-                            Context.Op.Platform.Fans.SetOff(false);
-
-                        // Set the fan to maximum speed
-                        Context.Op.Platform.Fans.SetMax(true);
-
-                    }
-
-                // Enable fan constant speed
-                } else if(this.RdoFanConst.Checked) {
-
-                    // Terminate any running fan program
-                    Context.Op.Program.Terminate();
-
-                    // The BIOS mandates that at least one fan
-                    // be left running at any given time, so if the user
-                    // wants both of them off, we use another way to do so
-                    if(bothMin) {
-
-                        // Switch the fans off
-                        if(!isFanOff) // If not already off
-                            Context.Op.Platform.Fans.SetOff(true);
-
-                    // Conversely, if the user wants maximum speed setting
-                    // for both fans, we just set it explicitly instead
-                    } else if(bothMax) {
-
-                        if(!isFanMax) // If not already at maximum speed
-                            Context.Op.Platform.Fans.SetMax(true);
-
-                    // Otherwise, we just set the speed levels normally
-                    } else {
-
-                        if(isFanMax) // Disable maximum speed first
-                            Context.Op.Platform.Fans.SetMax(false);
-
-                        if(isFanOff) // Re-enable fan if off first
-                            Context.Op.Platform.Fans.SetOff(false);
-
-                        // Set each fan to the user-selected level
-                        // or to zero, if the minimum value is selected
-                        // (the fan-safety guard floors a zero while warm)
-                        Context.Op.Platform.Fans.SetLevels(new byte[] {
-                            level0Min ? (byte) 0 : level0,
-                            level1Min ? (byte) 0 : level1});
-
-                        // Reset the fan mode so that the settings are applied
-                        Context.Op.Platform.Fans.SetMode(
-                            Context.Op.Platform.Fans.GetMode());
-
-                    }
-
-                // Enable automatic fan mode (default)
-                } else if(this.RdoFanAuto.Checked) {
-
-                    // Terminate any running fan program
-                    Context.Op.Program.Terminate();
-
-                    if(isFanOff) // Re-enable fan if off first
-                        Context.Op.Platform.Fans.SetOff(false);
-
-                    if(isFanMax) // Disable maximum speed first
-                        Context.Op.Platform.Fans.SetMax(false);
-
-                    // Hand back any OmenMon-held levels, then apply the preset
-                    Context.Op.ApplyPreset(presetAsk);
-
-                }
+                // Run the selected mode. The sequences are in FanActions, so the tests
+                // run exactly what the form sends.
+                FanActions.Request? request =
+                    program != null ? FanActions.Request.Program
+                    : this.RdoFanOff.Checked ? FanActions.Request.Off
+                    : this.RdoFanMax.Checked ? FanActions.Request.Max
+                    : this.RdoFanConst.Checked ? FanActions.Request.Constant
+                    : this.RdoFanAuto.Checked ? FanActions.Request.Auto
+                    : (FanActions.Request?) null;
+                if(request.HasValue)
+                    FanActions.Apply(request.Value, Context.Op.Platform.Fans, Context.Op.Program,
+                        isFanMax, isFanOff, program,
+                        level0Min ? (byte) 0 : level0, level1Min ? (byte) 0 : level1,
+                        bothMin, bothMax,
+                        () => Context.Op.ApplyPreset(presetAsk));
 
                 // Re-evaluate constant-speed maintenance for the monitor
                 Context.Op.ConstantSpeedActive = this.RdoFanConst.Checked;
@@ -844,12 +755,13 @@ namespace OmenMon.AppGui {
                         s.FanLevel[1], this.TrkFan1Lvl.Minimum, this.TrkFan1Lvl.Maximum);
             } catch { }
 
-            // Update the fan rate [%]
+            // Update the fan rate [%] (a BIOS-only board has no rate register: unknown,
+            // shown as "--")
             try {
-                this.BarFan0Rte.Value = s.FanRate[0];
-                this.BarFan1Rte.Value = s.FanRate[1];
-                this.LblFan0Rte.Text = this.BarFan0Rte.Value.ToString();
-                this.LblFan1Rte.Text = this.BarFan1Rte.Value.ToString();
+                this.BarFan0Rte.Value = s.FanRate[0] < 0 ? 0 : s.FanRate[0];
+                this.BarFan1Rte.Value = s.FanRate[1] < 0 ? 0 : s.FanRate[1];
+                this.LblFan0Rte.Text = s.FanRate[0] < 0 ? "--" : this.BarFan0Rte.Value.ToString();
+                this.LblFan1Rte.Text = s.FanRate[1] < 0 ? "--" : this.BarFan1Rte.Value.ToString();
             } catch { }
 
             // Show the countdown, if applicable

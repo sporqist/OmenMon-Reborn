@@ -95,10 +95,11 @@ namespace OmenMon.Hardware.Platform {
             ISettings system,
             IFanArray fans,
             IPlatformReadComponent[] temperature,
-            bool[] temperatureUse) {
+            bool[] temperatureUse,
+            PlatformPreset preset = null) {
 
             this.System = system;
-            this.Preset = PlatformPreset.Default;
+            this.Preset = preset ?? PlatformPreset.Default;
             this.Fans = fans;
             this.Temperature = temperature;
             this.TemperatureUse = temperatureUse;
@@ -108,6 +109,16 @@ namespace OmenMon.Hardware.Platform {
 
             InitFanSafety();
 
+        }
+
+        // How this platform's fans are controlled (the model's FanControl)
+        public FanControlKind FanControl {
+            get { return this.Preset.FanControl; }
+        }
+
+        // The model preset in use
+        public PlatformPreset Model {
+            get { return this.Preset; }
         }
 
         // Initializes the fan controls
@@ -126,49 +137,75 @@ namespace OmenMon.Hardware.Platform {
             AutoCal.Load(product);
             AutoCal.Prime(product);
 
-            this.Fans = new FanArray(
+            this.Fans = CreateFanArray(preset);
+
+        }
+
+        // Builds the fan array for a model: over the given EC registers and BIOS (the live
+        // ones unless a test substitutes them). An EC model gets its registers as before;
+        // a BIOS-only model gets none of them (AbsentComponent), its speed is the BIOS
+        // level x 100 and its fan array never reads or writes an EC fan register.
+        internal static FanArray CreateFanArray(PlatformPreset preset, IEcRegisters registers = null, IBiosCtl bios = null) {
+
+            const PlatformData.AccessType R = PlatformData.AccessType.Read;
+            const PlatformData.AccessType W = PlatformData.AccessType.Write;
+            const PlatformData.AccessType RW = R | W;
+            const PlatformData.DataSize B = PlatformData.DataSize.Byte;
+            const PlatformData.DataSize Wd = PlatformData.DataSize.Word;
+
+            if(preset.IsBiosOnly)
+                return new FanArray(
+                    new IFan[] {
+                        new Fan(BiosData.FanType.Cpu,
+                            new AbsentComponent("FanLevel0"), new AbsentComponent("FanRateRead0"),
+                            new AbsentComponent("FanRateWrite0"), new AbsentComponent("FanSpeed0"),
+                            bios, true),
+                        new Fan(BiosData.FanType.Gpu,
+                            new AbsentComponent("FanLevel1"), new AbsentComponent("FanRateRead1"),
+                            new AbsentComponent("FanRateWrite1"), new AbsentComponent("FanSpeed1"),
+                            bios, true) },
+                    new AbsentComponent("Countdown"),
+                    new AbsentComponent("Manual"),
+                    new AbsentComponent("Mode"),
+                    new AbsentComponent("Switch"),
+                    preset.ManualValueOn,
+                    preset.ManualValueOff,
+                    bios,
+                    FanControlKind.Bios);
+
+            return new FanArray(
                 new IFan[] {
 
                     // CPU fan
                     new Fan(
                         BiosData.FanType.Cpu,
-                        new EcComponent(preset.FanLevelReg0,
-                            PlatformData.AccessType.Read | PlatformData.AccessType.Write),
-                        new EcComponent(preset.FanRateReadReg0,
-                            PlatformData.AccessType.Read),
-                        new EcComponent(preset.FanRateWriteReg0,
-                            PlatformData.AccessType.Write),
-                        new EcComponent(preset.FanSpeedReg0,
-                            PlatformData.AccessType.Read,
-                            PlatformData.DataSize.Word)),
+                        new EcComponent(preset.FanLevelReg0, RW, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanRateReadReg0, R, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanRateWriteReg0, W, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanSpeedReg0, R, Wd, int.MaxValue, registers),
+                        bios),
 
                     // GPU fan (RPM3 not RPM2 is intentional — RPM2 is the CPU high byte)
                     new Fan(
                         BiosData.FanType.Gpu,
-                        new EcComponent(preset.FanLevelReg1,
-                            PlatformData.AccessType.Read | PlatformData.AccessType.Write),
-                        new EcComponent(preset.FanRateReadReg1,
-                            PlatformData.AccessType.Read),
-                        new EcComponent(preset.FanRateWriteReg1,
-                            PlatformData.AccessType.Write),
-                        new EcComponent(preset.FanSpeedReg1,
-                            PlatformData.AccessType.Read,
-                            PlatformData.DataSize.Word)) },
+                        new EcComponent(preset.FanLevelReg1, RW, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanRateReadReg1, R, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanRateWriteReg1, W, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanSpeedReg1, R, Wd, int.MaxValue, registers),
+                        bios) },
 
-                new EcComponent(preset.CountdownReg,
-                    PlatformData.AccessType.Read | PlatformData.AccessType.Write),
+                new EcComponent(preset.CountdownReg, RW, B, int.MaxValue, registers),
 
-                new EcComponent(preset.ManualReg,
-                    PlatformData.AccessType.Read | PlatformData.AccessType.Write),
+                new EcComponent(preset.ManualReg, RW, B, int.MaxValue, registers),
 
-                new EcComponent(preset.ModeReg,
-                    PlatformData.AccessType.Read | PlatformData.AccessType.Write),
+                new EcComponent(preset.ModeReg, RW, B, int.MaxValue, registers),
 
-                new EcComponent(preset.SwitchReg,
-                    PlatformData.AccessType.Read | PlatformData.AccessType.Write),
+                new EcComponent(preset.SwitchReg, RW, B, int.MaxValue, registers),
 
                 preset.ManualValueOn,
-                preset.ManualValueOff);
+                preset.ManualValueOff,
+                bios,
+                FanControlKind.Ec);
 
         }
 

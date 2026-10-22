@@ -12,6 +12,7 @@ using System.IO;
 using System.Windows.Forms;
 using System.Text;
 using System.Xml;
+using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
 using OmenMon.Hardware.Platform;
@@ -147,6 +148,9 @@ namespace OmenMon.Library {
         private static readonly HashSet<string> LoadedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LoadedGraphicsProfiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Why model database entries did not load (the last Load(); shown by -Diag)
+        public static readonly List<string> ModelLoadProblems = new List<string>();
+
         // Whether the configuration file exists but could not be loaded: the settings in
         // use are then (mostly) the defaults, and a save must not write them over the file
         public static bool LoadFailed { get; private set; }
@@ -191,6 +195,8 @@ namespace OmenMon.Library {
             LoadedSensors.Clear();
             LoadedModels.Clear();
             LoadedGraphicsProfiles.Clear();
+            lock(ModelLoadProblems)
+                ModelLoadProblems.Clear();
             LoadFailedBackedUp = false;
             LoadFailedReported = false;
 
@@ -580,13 +586,15 @@ namespace OmenMon.Library {
                         LoadedSensors.UnionWith(sensorsXml);
                     }
 
-                    // Load the model database entries
+                    // Load the model database entries. One that cannot be read is not
+                    // loaded (and stays in the file); why is recorded, not dropped silently
                     foreach(XmlNode node in xml.SelectNodes(XmlPrefixModel)) {
                         OmenMon.Hardware.Platform.PlatformPreset p;
-                        if(TryParseModel(node, out p)) {
+                        if(TryParseModel(node, out p, out string problem)) {
                             Models[p.ProductId] = p;
                             LoadedModels.Add(p.ProductId);
-                        }
+                        } else
+                            NoteModelProblem(problem);
                     }
 
                     // Load the fan programs
@@ -715,54 +723,113 @@ namespace OmenMon.Library {
             return false;
         }
 
-        // Parses a model database element
+        // Parses a model database element; see the overload for problem
         private static bool TryParseModel(XmlNode node, out OmenMon.Hardware.Platform.PlatformPreset p) {
+            return TryParseModel(node, out p, out _);
+        }
+
+        // Parses a model database element. An EC model (the default) needs all twelve
+        // fan register elements; a BIOS-only model (<FanControl>Bios</FanControl>) needs
+        // none and ignores them (it never uses an EC fan register). Every value must be a
+        // byte: an entry with a value that is not, or with a missing required element, is
+        // not loaded, and problem says why (no value is read as 0 any more).
+        private static bool TryParseModel(XmlNode node, out OmenMon.Hardware.Platform.PlatformPreset p, out string problem) {
             p = null;
-            try {
-                string productId = node.Attributes[XmlAttrModelProductId].Value;
-                if(string.IsNullOrEmpty(productId))
+            problem = null;
+            string productId = node?.Attributes?[XmlAttrModelProductId]?.Value;
+            if(string.IsNullOrEmpty(productId)) {
+                problem = "a <" + XmlElementModel + "> without " + XmlAttrModelProductId;
+                return false;
+            }
+            string displayName = node.Attributes[XmlAttrModelDisplayName]?.Value ?? "";
+            var preset = new OmenMon.Hardware.Platform.PlatformPreset();
+            preset.ProductId = productId;
+            preset.DisplayName = displayName;
+
+            // How the fans are controlled (absent: Ec, as every entry before it existed)
+            XmlNode kind = node[XmlElementFanControl];
+            if(kind != null) {
+                string text = kind.InnerText.Trim();
+                if(text == XmlFanControlBios)
+                    preset.FanControl = FanControlKind.Bios;
+                else if(text == XmlFanControlEc)
+                    preset.FanControl = FanControlKind.Ec;
+                else {
+                    problem = "Model " + productId + ": <" + XmlElementFanControl + "> is '" + text + "', expected " + XmlFanControlBios + " or " + XmlFanControlEc;
                     return false;
-                string displayName = "";
-                try { displayName = node.Attributes[XmlAttrModelDisplayName].Value; } catch { }
-                p = new OmenMon.Hardware.Platform.PlatformPreset();
-                p.ProductId        = productId;
-                p.DisplayName      = displayName;
-                p.FanLevelReg0     = Conv.GetByte(node[XmlElementFanLevelReg0].InnerText);
-                p.FanLevelReg1     = Conv.GetByte(node[XmlElementFanLevelReg1].InnerText);
-                p.FanRateReadReg0  = Conv.GetByte(node[XmlElementFanRateReadReg0].InnerText);
-                p.FanRateReadReg1  = Conv.GetByte(node[XmlElementFanRateReadReg1].InnerText);
-                p.FanRateWriteReg0 = Conv.GetByte(node[XmlElementFanRateWriteReg0].InnerText);
-                p.FanRateWriteReg1 = Conv.GetByte(node[XmlElementFanRateWriteReg1].InnerText);
-                p.FanSpeedReg0     = Conv.GetByte(node[XmlElementFanSpeedReg0].InnerText);
-                p.FanSpeedReg1     = Conv.GetByte(node[XmlElementFanSpeedReg1].InnerText);
-                p.CountdownReg     = Conv.GetByte(node[XmlElementCountdownReg].InnerText);
-                p.ManualReg        = Conv.GetByte(node[XmlElementManualReg].InnerText);
-                p.ModeReg          = Conv.GetByte(node[XmlElementModeReg].InnerText);
-                p.SwitchReg        = Conv.GetByte(node[XmlElementSwitchReg].InnerText);
+                }
+            }
+
+            // Reads one byte element: absent is fine if optional; a value that is not a
+            // byte never is
+            bool ok = true;
+            string why = null;
+            Func<string, bool, byte, byte> read = (name, required, otherwise) => {
+                if(!ok)
+                    return otherwise;
+                XmlNode element = node[name];
+                if(element == null) {
+                    if(required) {
+                        ok = false;
+                        why = "Model " + productId + ": <" + name + "> is missing";
+                    }
+                    return otherwise;
+                }
+                if(!Conv.GetByte(element.InnerText.Trim(), out byte value)) {
+                    ok = false;
+                    why = "Model " + productId + ": <" + name + "> is '" + element.InnerText.Trim() + "', not a byte";
+                    return otherwise;
+                }
+                return value;
+            };
+
+            // The EC fan registers: an EC model's own; a BIOS-only model has none
+            if(!preset.IsBiosOnly) {
+                preset.FanLevelReg0     = read(XmlElementFanLevelReg0, true, 0);
+                preset.FanLevelReg1     = read(XmlElementFanLevelReg1, true, 0);
+                preset.FanRateReadReg0  = read(XmlElementFanRateReadReg0, true, 0);
+                preset.FanRateReadReg1  = read(XmlElementFanRateReadReg1, true, 0);
+                preset.FanRateWriteReg0 = read(XmlElementFanRateWriteReg0, true, 0);
+                preset.FanRateWriteReg1 = read(XmlElementFanRateWriteReg1, true, 0);
+                preset.FanSpeedReg0     = read(XmlElementFanSpeedReg0, true, 0);
+                preset.FanSpeedReg1     = read(XmlElementFanSpeedReg1, true, 0);
+                preset.CountdownReg     = read(XmlElementCountdownReg, true, 0);
+                preset.ManualReg        = read(XmlElementManualReg, true, 0);
+                preset.ModeReg          = read(XmlElementModeReg, true, 0);
+                preset.SwitchReg        = read(XmlElementSwitchReg, true, 0);
                 // Optional per-model manual-trigger overrides (default FanManual.On/.Off).
                 // Boards that gate manual fan control with a different value pair
                 // (e.g. 8BBE — Victus 16 R0053NT — writes 0x08 to EC[0x06] to engage,
                 // 0x48 to release) declare these explicitly; absent elements fall
                 // back to the standard OMCC pair set on the preset's defaults.
-                if(node[XmlElementManualValueOn] != null)
-                    p.ManualValueOn = Conv.GetByte(node[XmlElementManualValueOn].InnerText);
-                if(node[XmlElementManualValueOff] != null)
-                    p.ManualValueOff = Conv.GetByte(node[XmlElementManualValueOff].InnerText);
-                // Optional per-model temperature-sensor overrides — remap the
-                // named CPUT / GPTM sensors to a different EC offset than the
-                // global <Temperature> config. Used by boards that moved the
-                // real CPU/GPU temp sensors away from legacy 0x57/0xB7 (e.g.
-                // 8C9C exposes CPU at 0xB0 and GPU at 0xB4). Absent / 0 =
-                // no override.
-                if(node[XmlElementTempCpuReg] != null)
-                    p.TempCpuReg = Conv.GetByte(node[XmlElementTempCpuReg].InnerText);
-                if(node[XmlElementTempGpuReg] != null)
-                    p.TempGpuReg = Conv.GetByte(node[XmlElementTempGpuReg].InnerText);
-                return true;
-            } catch {
-                p = null;
+                preset.ManualValueOn    = read(XmlElementManualValueOn, false, preset.ManualValueOn);
+                preset.ManualValueOff   = read(XmlElementManualValueOff, false, preset.ManualValueOff);
+            }
+
+            // Optional per-model temperature-sensor overrides — remap the
+            // named CPUT / GPTM sensors to a different EC offset than the
+            // global <Temperature> config. Used by boards that moved the
+            // real CPU/GPU temp sensors away from legacy 0x57/0xB7 (e.g.
+            // 8C9C exposes CPU at 0xB0 and GPU at 0xB4). Absent / 0 =
+            // no override. On a BIOS-only model they are its only EC sensors.
+            preset.TempCpuReg = read(XmlElementTempCpuReg, false, 0);
+            preset.TempGpuReg = read(XmlElementTempGpuReg, false, 0);
+
+            if(!ok) {
+                problem = why;
                 return false;
             }
+            p = preset;
+            return true;
+        }
+
+        // Records why a model entry did not load (for -Diag, and traced)
+        private static void NoteModelProblem(string problem) {
+            if(string.IsNullOrEmpty(problem))
+                return;
+            lock(ModelLoadProblems)
+                ModelLoadProblems.Add(problem);
+            System.Diagnostics.Trace.WriteLine("OmenMon: model database entry not loaded: " + problem);
         }
 
         // Parses a fan program element
@@ -1510,6 +1577,17 @@ namespace OmenMon.Library {
             XmlElement mnode = xml.CreateElement(XmlElementModel);
             mnode.SetAttribute(XmlAttrModelProductId, p.ProductId ?? "");
             mnode.SetAttribute(XmlAttrModelDisplayName, p.DisplayName ?? "");
+
+            // A BIOS-only model: its kind and its temperature registers, no EC fan register
+            if(p.IsBiosOnly) {
+                mnode.AppendChild(xml.CreateElement(XmlElementFanControl)).InnerText = XmlFanControlBios;
+                if(p.TempCpuReg != 0)
+                    mnode.AppendChild(xml.CreateElement(XmlElementTempCpuReg)).InnerText = Conv.GetString((uint) p.TempCpuReg, 1, 10);
+                if(p.TempGpuReg != 0)
+                    mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
+                return mnode;
+            }
+
             mnode.AppendChild(xml.CreateElement(XmlElementFanLevelReg0)).InnerText     = Conv.GetString((uint) p.FanLevelReg0, 1, 10);
             mnode.AppendChild(xml.CreateElement(XmlElementFanLevelReg1)).InnerText     = Conv.GetString((uint) p.FanLevelReg1, 1, 10);
             mnode.AppendChild(xml.CreateElement(XmlElementFanRateReadReg0)).InnerText  = Conv.GetString((uint) p.FanRateReadReg0, 1, 10);

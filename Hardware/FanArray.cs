@@ -18,6 +18,9 @@ namespace OmenMon.Hardware.Platform {
 
         public IFan[] Fan { get; }
 
+        // How the fans are controlled: Ec (the model's EC fan registers) or Bios (none)
+        public FanControlKind Control { get; }
+
         // Retrieves or sets the countdown value
         // until automatic settings are restored [s]
         public int GetCountdown();
@@ -64,9 +67,18 @@ namespace OmenMon.Hardware.Platform {
         public bool GetManual();
         public void SetManual(bool flag);
 
-        // Retrieves or sets the current fan mode
-        public BiosData.FanMode GetMode();
+        // Retrieves the current fan mode (null: unknown; always on a BIOS-only board,
+        // whose mode register is not known) or sets it. Only modes OmenMon chose (a
+        // preset, a program, the configuration) are ever sent: never one read back
+        public BiosData.FanMode? GetMode();
         public void SetMode(BiosData.FanMode mode);
+
+        // The last mode OmenMon sent, null if none since start
+        public BiosData.FanMode? LastModeSent { get; }
+
+        // Sends a 0x10 fan-count query now: arms a following 0x2E and keeps a held level
+        // alive (not on a fan array that sets levels through the EC)
+        public void Arm();
 
         // Retrieves the fan off switch status
         // or switches the fan off
@@ -83,6 +95,28 @@ namespace OmenMon.Hardware.Platform {
 
         // Fan array
         public IFan[] Fan { get; private set; }
+
+        // How the fans are controlled (see IFanArray)
+        public FanControlKind Control { get; private set; }
+
+        // The last mode sent (see IFanArray)
+        private volatile object lastModeSent;
+        public BiosData.FanMode? LastModeSent {
+            get { return this.lastModeSent as BiosData.FanMode?; }
+        }
+
+        // When OmenMon last sent a 0x10 or 0x2E (for the hold countdown of a BIOS-only
+        // board), default if never
+        private DateTime lastRefreshAt;
+
+        // Whether levels are written through the EC, and whether manual mode is set first:
+        // only on an EC model, where the settings ask for it. A BIOS-only model never does
+        private bool UseEc {
+            get { return this.Control == FanControlKind.Ec && Config.FanLevelUseEc; }
+        }
+        private bool NeedManual {
+            get { return this.Control == FanControlKind.Ec && Config.FanLevelNeedManual; }
+        }
 
         // Stores the countdown platform component
         protected IPlatformReadWriteComponent Countdown;
@@ -126,9 +160,11 @@ namespace OmenMon.Hardware.Platform {
             IPlatformReadWriteComponent fanSwitch,
             byte manualValueOn  = (byte) PlatformData.FanManual.On,
             byte manualValueOff = (byte) PlatformData.FanManual.Off,
-            IBiosCtl bios = null) {
+            IBiosCtl bios = null,
+            FanControlKind control = FanControlKind.Ec) {
 
             this.bios = bios;
+            this.Control = control;
             this.ManualValueOn  = manualValueOn;
             this.ManualValueOff = manualValueOff;
 
@@ -156,15 +192,30 @@ namespace OmenMon.Hardware.Platform {
         }
 
         // Retrieves the countdown value [s]
-        // until automatic settings are restored
+        // until automatic settings are restored. BIOS-only: the time a level OmenMon
+        // holds has left from its own last 0x10/0x2E (the BIOS heartbeat, sent
+        // elsewhere, refreshes the hold too)
         public int GetCountdown() {
+            if(this.Control == FanControlKind.Bios) {
+                bool holds = this.Guard != null && this.Guard.HoldsLevel;
+                return BiosFanControl.HoldSecondsLeft(
+                    holds && this.lastRefreshAt != default(DateTime) ? this.lastRefreshAt : (DateTime?) null,
+                    Now, BiosFanControl.DefaultLevelHold);
+            }
             this.Countdown.Update();
             return this.Countdown.GetValue();
         }
 
-        // Sets the countdown value [s]
+        // Sets the countdown value [s]. BIOS-only: nothing (there is no countdown register)
         public void SetCountdown(int countdown) {
+            if(this.Control == FanControlKind.Bios)
+                return;
             this.Countdown.SetValue(countdown);
+        }
+
+        // The time for the hold countdown and the arm interval
+        private DateTime Now {
+            get { return this.Guard != null ? this.Guard.Now : DateTime.UtcNow; }
         }
 
         // Retrieves the levels of all fans at the same time
@@ -231,7 +282,7 @@ namespace OmenMon.Hardware.Platform {
                 return false;
 
             ArmFanLevel(false);
-            if(Config.FanLevelUseEc && this.GetOff())
+            if(UseEc && this.GetOff())
                 this.Switch.SetValue((int) PlatformData.FanSwitch.On);
             WriteLevels(level);
             this.Guard.RecordSupervisedWrite(level.ToArray());
@@ -312,15 +363,21 @@ namespace OmenMon.Hardware.Platform {
         // themselves, at most every 20 s unless forced, so they work even while the
         // heartbeat is paused (battery) or quiet (after a hand-back).
         private void ArmFanLevel(bool force) {
-            if(Config.FanLevelUseEc)
+            if(UseEc)
                 return;
-            DateTime now = this.Guard != null ? this.Guard.Now : DateTime.UtcNow;
+            DateTime now = Now;
             if(!force && now - this.lastArmAt < TimeSpan.FromSeconds(20))
                 return;
             try {
                 this.Bios.GetFanCount();
                 this.lastArmAt = now;
+                this.lastRefreshAt = now;
             } catch { }
+        }
+
+        // Sends a 0x10 now (see IFanArray)
+        public void Arm() {
+            ArmFanLevel(true);
         }
 
         // Writes a level the fan-safety guard decided on (every write while there is a guard)
@@ -337,12 +394,12 @@ namespace OmenMon.Hardware.Platform {
         private void WriteLevels(byte[] levels, Action biosWrite) {
 
             // Set manual fan mode, if needed
-            if(Config.FanLevelNeedManual)
+            if(NeedManual)
                 this.SetManual(true);
 
             // Depending on the configuration setting,
             // use either the BIOS or the EC to set levels
-            if(Config.FanLevelUseEc) {
+            if(UseEc) {
 
                 // Try to set the speed for each fan individually
                 for(int i = 0; i < levels.Length; i++)
@@ -351,7 +408,9 @@ namespace OmenMon.Hardware.Platform {
             } else {
                 try {
 
-                    // Make a WMI BIOS call to set the level of both fans
+                    // Make a WMI BIOS call to set the level of both fans (it sends 0x10
+                    // and 0x2E, which both refresh the hold)
+                    this.lastRefreshAt = Now;
                     biosWrite();
 
                 } catch {
@@ -368,13 +427,18 @@ namespace OmenMon.Hardware.Platform {
             }
         }
 
-        // Retrieves the manual fan speed toggle status
+        // Retrieves the manual fan speed toggle status. BIOS-only: whether OmenMon holds
+        // a level (the guard's state; there is no manual register)
         public bool GetManual() {
+            if(this.Control == FanControlKind.Bios)
+                return this.Guard != null && this.Guard.HoldsLevel;
             return this.Manual.GetValue() == this.ManualValueOn;
         }
 
-        // Sets the manual fan speed toggle status
+        // Sets the manual fan speed toggle status. BIOS-only: nothing
         public void SetManual(bool flag) {
+            if(this.Control == FanControlKind.Bios)
+                return;
             this.Manual.SetValue(flag ? this.ManualValueOn : this.ManualValueOff);
         }
 
@@ -388,20 +452,33 @@ namespace OmenMon.Hardware.Platform {
             Hw.BiosSet(this.Bios.SetMaxFan, flag);
         }
 
-        // Retrieves the current fan mode
-        public BiosData.FanMode GetMode() {
+        // Retrieves the current fan mode from the EC mode register, for display and to
+        // compare with a wanted mode. BIOS-only: unknown (null), never an EC byte
+        public BiosData.FanMode? GetMode() {
+            if(this.Control == FanControlKind.Bios)
+                return null;
             this.Mode.Update();
             return (BiosData.FanMode) this.Mode.GetValue();
         }
 
-        // Sets the current fan mode
+        // Sets the current fan mode (BIOS 0x1A). Only a defined mode is sent: one that
+        // came from a preset, a program or the configuration (all parsed as defined
+        // values); anything else is refused and nothing is sent
         public void SetMode(BiosData.FanMode mode) {
+            if(!Enum.IsDefined(typeof(BiosData.FanMode), mode)) {
+                System.Diagnostics.Trace.WriteLine("OmenMon: fan mode 0x" + ((byte) mode).ToString("X2") + " is not defined, not sent");
+                return;
+            }
+            this.lastModeSent = mode;
             Hw.BiosSet<BiosData.FanMode>(this.Bios.SetFanMode, mode);
             // Note: WMI BIOS call preferred over this.Mode.SetValue((byte) mode);
         }
 
-        // Retrieves the fan off switch status
+        // Retrieves the fan off switch status. BIOS-only: whether the level OmenMon holds
+        // has both fans off (the guard's state; there is no switch register)
         public bool GetOff() {
+            if(this.Control == FanControlKind.Bios)
+                return this.Guard != null && BiosFanControl.IsOff(this.Guard.Written);
             this.Switch.Update();
             return ((PlatformData.FanSwitch) this.Switch.GetValue()) == PlatformData.FanSwitch.Off;
         }
@@ -409,13 +486,21 @@ namespace OmenMon.Hardware.Platform {
         // Switches the fan off or back on. Switching off is a request for 0/0 and goes
         // through the fan-safety guard: while the system is not known to be cool (or once
         // the Fan Off time limit is up) the fans get the floor level instead.
+        // BIOS-only: switching back on writes nothing to the EC; if OmenMon has the fans
+        // off, it hands control back (a safe level, then the BIOS curve), otherwise there
+        // is nothing to do (the caller's next level goes through the guard anyway).
         public void SetOff(bool flag) {
+            if(!flag && this.Control == FanControlKind.Bios) {
+                if(GetOff())
+                    Release();
+                return;
+            }
             SafeLevel allowedOff = default(SafeLevel);
             if(flag && this.Guard != null) {
                 byte[] off = new byte[] { 0, 0 };
                 SafeLevel actual = this.Guard.Allow(off);
                 if(actual.Cpu != 0 || actual.Gpu != 0) {
-                    if(Config.FanLevelUseEc && this.GetOff())
+                    if(UseEc && this.GetOff())
                         this.Switch.SetValue((int) PlatformData.FanSwitch.On);
                     WriteLevels(actual);
                     this.Guard.RecordWrite(off, actual.ToArray());
@@ -424,11 +509,12 @@ namespace OmenMon.Hardware.Platform {
                 this.Guard.RecordWrite(off, actual.ToArray());
                 allowedOff = actual;
             }
-            if(flag && !Config.FanLevelUseEc) {
+            if(flag && !UseEc) {
                 try {
 
                     // Use a BIOS call consistent with SetLevels when in BIOS fan level mode:
                     // the 0/0 the guard allowed (known cool), or without a guard (legacy) 0/0
+                    this.lastRefreshAt = Now;
                     if(allowedOff.IsValid)
                         Hw.BiosSet(this.Bios.SetFanLevel, allowedOff);
                     else

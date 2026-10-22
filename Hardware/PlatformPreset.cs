@@ -2,7 +2,9 @@
  //  \\  Copyright © 2023 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 // OmenMon-Reborn additions © 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
+using OmenMon.Core;
 using OmenMon.Hardware.Ec;
 
 namespace OmenMon.Hardware.Platform {
@@ -56,6 +58,19 @@ namespace OmenMon.Hardware.Platform {
         // <Temperature> config" — leaves every existing model entry unaffected.
         public byte TempCpuReg = 0;
         public byte TempGpuReg = 0;
+
+        // How the fans are controlled (<FanControl>Bios</FanControl> in the model entry).
+        // Ec, the default, uses the fan registers above as before. Bios uses none of them:
+        // no EC fan register is read or written, levels go through the BIOS (and the
+        // fan-safety guard), the speed is the 0x2D level x 100, and temperatures come
+        // from BIOS 0x23 plus TempCpuReg / TempGpuReg (see Platform). A Bios model needs
+        // none of the register elements.
+        public FanControlKind FanControl = FanControlKind.Ec;
+
+        // Whether this model is BIOS-only
+        public bool IsBiosOnly {
+            get { return this.FanControl == FanControlKind.Bios; }
+        }
 #endregion
 
 #region Default

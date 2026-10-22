@@ -4,6 +4,7 @@
 // Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
 using System;
+using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
 using OmenMon.Library;
@@ -48,6 +49,10 @@ namespace OmenMon.Hardware.Platform {
         private readonly IBiosCtl bios;
         protected IBiosCtl Bios { get { return this.bios ?? Hw.Bios; } }
 
+        // BIOS-only model: the speed is the 0x2D level x 100, whatever an AutoCal sidecar
+        // or the EC says (a calibration on such a board pinned temperature bytes as RPM)
+        private readonly bool levelMirror;
+
         // Constructs a fan instance
         public Fan(
             BiosData.FanType type,
@@ -55,9 +60,11 @@ namespace OmenMon.Hardware.Platform {
             IPlatformReadComponent rateRead,
             IPlatformWriteComponent rateWrite,
             IPlatformReadComponent speed,
-            IBiosCtl bios = null) {
+            IBiosCtl bios = null,
+            bool levelMirror = false) {
 
             this.bios = bios;
+            this.levelMirror = levelMirror;
             this.FanType = type;
             this.Level = level;
             this.RateRead = rateRead;
@@ -94,6 +101,9 @@ namespace OmenMon.Hardware.Platform {
         // override is wrong the user will see it immediately and can recalibrate, which
         // is far less confusing than a silent flip-flop between the two readings.
         public virtual int GetSpeed() {
+            if(this.levelMirror)
+                return BiosFanControl.Rpm(GetLevel());
+
             // Pull (offset, mode, multiplier) as a single atomic snapshot — see AutoCal for why.
             byte reg = 0;
             EcDiffScanner.Mode mode = default(EcDiffScanner.Mode);

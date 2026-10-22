@@ -94,18 +94,12 @@ namespace OmenMon.AppGui {
         // fan-safety guard). Callers hold HardwareLock.
         internal void ApplyPreset(PerformancePreset preset) {
             PresetSettings settings = PerformancePresets.Resolve(preset);
-            this.Platform.Fans.Release();
-            this.Platform.Fans.SetMode(settings.FanMode);
-            try {
-                if(settings.GpuPower.HasValue)
-                    this.Platform.System.SetGpuPower(new BiosData.GpuPowerData(settings.GpuPower.Value));
+            FanActions.ApplyPreset(this.Platform.Fans, this.Platform.System, settings, () => {
                 if(settings.RefreshRate.HasValue) {
                     Os.SetRefreshRate(settings.RefreshRate.Value);
                     this.EcoPlus.NoteRefreshSetByUser();
                 }
-                if(settings.Levels != null)
-                    this.Platform.Fans.SetLevels(settings.Levels);
-            } catch { }
+            });
             this.activePreset = preset;
         }
 

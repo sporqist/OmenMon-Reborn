@@ -371,6 +371,67 @@ namespace OmenMon.Hardware.Platform {
 
     }
 
+    // A component a BIOS-only model does not have (an EC fan register it must never touch:
+    // switch, countdown, manual, mode, rate, level, speed). Reads report "unknown" (Unknown,
+    // never a byte, and no valid reading); a write does nothing and is recorded once per
+    // component (Refused), so a code path that still tries one shows up in -Diag instead
+    // of reaching the EC.
+    public sealed class AbsentComponent : PlatformComponentAbstract, IPlatformReadWriteComponent {
+
+        // What GetValue() returns: not a value any register can hold
+        public const int Unknown = -1;
+
+        // Names of the absent components a write was refused for (one entry each)
+        private static readonly System.Collections.Generic.List<string> refused =
+            new System.Collections.Generic.List<string>();
+        public static string[] Refused {
+            get { lock(refused) return refused.ToArray(); }
+        }
+
+        private bool loggedWrite;
+
+        public AbsentComponent(string name) {
+            this.AccessType = PlatformData.AccessType.Read | PlatformData.AccessType.Write;
+            this.Constraint = int.MaxValue;
+            this.LinkType = PlatformData.LinkType.EmbeddedController;
+            this.Size = PlatformData.DataSize.Byte;
+            this.Name = name;
+            this.LastValue = Unknown;
+            this.PreviousValue = Unknown;
+        }
+
+        // Nothing to read: the value stays Unknown, and there is never a valid reading
+        public override bool Update() {
+            return false;
+        }
+
+        public override int GetValue() {
+            return Unknown;
+        }
+
+        protected override int Read() {
+            return Unknown;
+        }
+
+        protected override bool TryRead(out int value) {
+            value = Unknown;
+            return false;
+        }
+
+        // Nothing is written; the first refused write is recorded
+        public override void SetValue(int value) {
+            if(this.loggedWrite)
+                return;
+            this.loggedWrite = true;
+            string entry = (this.Name ?? "?") + " (BIOS-only model, write of " + value + " refused)";
+            lock(refused)
+                if(!refused.Contains(entry))
+                    refused.Add(entry);
+            System.Diagnostics.Trace.WriteLine("OmenMon: " + entry);
+        }
+
+    }
+
     // Implements an Embedded Controller temperature sensor. A reading is only valid if the
     // EC lock was obtained and the value is a plausible temperature: 0 is what a failed
     // read, a parked GPU and an unpopulated register all return, so it is never treated
