@@ -175,6 +175,29 @@ namespace OmenMon.Tests {
             Assert.Contains("<FanLevelReg1>0xZZ</FanLevelReg1>", text);
         }
 
+        // T4: what the unknown-model prompt saves (Config.SaveModel of the detector's
+        // result) has no control register, and loads back as a BIOS-only model
+        [Fact]
+        public void UnknownModelPrompt_SavesNoControlRegister() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            byte[] ec = new byte[256];
+            ec[0x57] = 45;   // a plausible 2022 layout
+            ec[0x34] = 20;
+            PlatformPreset detected = AutoDetector.Detect("9ZZZ", ec)!;
+            Assert.NotNull(detected);
+            Config.SaveModel(detected);
+
+            string entry = Regex.Match(File.ReadAllText(File_), @"<Model ProductId=""9ZZZ""[\s\S]*?</Model>").Value;
+            Assert.Contains("<FanControl>Bios</FanControl>", entry);
+            foreach(string reg in new[] { "FanLevelReg", "FanRate", "FanSpeedReg", "CountdownReg", "ManualReg", "ModeReg", "SwitchReg", "TempCpuReg", "TempGpuReg" })
+                Assert.DoesNotContain(reg, entry);
+
+            Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
+            Config.Load();
+            Assert.True(Config.Models["9ZZZ"].IsBiosOnly);
+        }
+
         // A BIOS-only model loaded from the configuration builds a fan array without an EC
         // fan register
         [Fact]

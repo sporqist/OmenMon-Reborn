@@ -167,18 +167,24 @@ namespace OmenMon.AppGui {
             CheckUnknownModel();
         }
 
-        // Prompts the user to run heuristic auto-detection if the current product ID is not in the model DB
+        // A board without a model entry. If its BIOS fan interface answers it already runs
+        // BIOS-only (Platform.ResolvePreset): nothing to ask. Otherwise it runs on the
+        // default EC layout, not verified for it: warn once and offer the read-only scan.
+        // The scan never saves a control register: a recognised board is saved as a
+        // BIOS-only model (AutoDetector).
         private void CheckUnknownModel() {
             try {
                 string product = Context.Op.Platform.System.GetProduct();
-                if(product == "?" || Config.Models.ContainsKey(product))
+                if(product == "?" || !Context.Op.Platform.UnverifiedEcLayout)
                     return;
 
                 var answer = MessageBox.Show(
-                    $"Unknown Omen model detected ({product}).\n\nRun a safe read-only hardware scan to auto-configure sensors?",
+                    $"Unknown Omen model detected ({product}).\n\n"
+                    + "Its BIOS fan interface does not answer, so OmenMon uses the default EC register layout, which is not verified for this board.\n\n"
+                    + "Run a safe read-only hardware scan? It never saves fan control registers: a recognised board is saved as BIOS fan control only.",
                     Config.AppName,
                     MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
+                    MessageBoxIcon.Warning);
 
                 if(answer != DialogResult.Yes)
                     return;
@@ -196,13 +202,13 @@ namespace OmenMon.AppGui {
                 if(preset != null) {
                     Config.SaveModel(preset);
                     MessageBox.Show(
-                        $"Auto-configuration saved for {product}.\n\nThe standard 2022+ register layout was confirmed on your device.",
+                        $"Saved {product} as BIOS fan control (no EC fan registers).\n\nRestart OmenMon to use it.",
                         Config.AppName,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
                 } else {
                     MessageBox.Show(
-                        $"Could not auto-detect register layout for {product}.\n\nPlease use 'Auto-Calibrate & Diagnose...' from the tray menu to identify the correct EC registers for your hardware and report them to the project.",
+                        $"Could not recognise the register layout of {product}.\n\nPlease report the board with the output of 'Copy Diagnostic Info' from the tray menu.",
                         Config.AppName,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);

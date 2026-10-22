@@ -61,13 +61,17 @@ namespace OmenMon.Core {
         // TMP1 0x59, TNTx) are other data on these boards (on 8C77 0x57 is the keyboard
         // colour, 0x58 flag bits, 0x59 the thermal policy, which reads "80 °C" in Cool
         // mode), so they feed neither the display, the maximum, panic nor the programs.
-        // Every sensor listed counts for the maximum temperature.
-        public static TemperatureSensorPlan[] Sensors(byte tempCpuReg, byte tempGpuReg) {
+        // Every sensor listed counts for the maximum temperature. gpuFromDriver: a board
+        // without a GPU register (an unknown board) reads the GPU from the graphics
+        // driver (NVML) while the dGPU is awake.
+        public static TemperatureSensorPlan[] Sensors(byte tempCpuReg, byte tempGpuReg, bool gpuFromDriver = false) {
             var plan = new System.Collections.Generic.List<TemperatureSensorPlan>();
             if(tempCpuReg != 0)
                 plan.Add(new TemperatureSensorPlan("CPUT", TemperatureSource.Ec, tempCpuReg));
             if(tempGpuReg != 0)
                 plan.Add(new TemperatureSensorPlan("GPTM", TemperatureSource.Ec, tempGpuReg));
+            else if(gpuFromDriver)
+                plan.Add(new TemperatureSensorPlan("GPTM", TemperatureSource.GpuDriver, 0));
             plan.Add(new TemperatureSensorPlan("BIOS", TemperatureSource.Bios, 0));
             return plan.ToArray();
         }
@@ -76,8 +80,9 @@ namespace OmenMon.Core {
 
     // Where a temperature reading comes from
     public enum TemperatureSource {
-        Bios,  // BIOS 0x23
-        Ec     // an EC register
+        Bios,       // BIOS 0x23
+        Ec,         // an EC register
+        GpuDriver   // the graphics driver (NVML), only while the dGPU is awake
     }
 
     // One temperature sensor to set up: its name (what the fan logic looks it up by),
@@ -96,6 +101,53 @@ namespace OmenMon.Core {
 
         public override string ToString() {
             return this.Name + " (" + this.Source + (this.Source == TemperatureSource.Ec ? " 0x" + this.Register.ToString("X2") : "") + ")";
+        }
+
+    }
+
+    // F3: a board without a model entry. If the BIOS fan interface answers (a fan count
+    // of at least 1 from 0x10, the levels readable through 0x2D, thermal policy V1, as on
+    // 8BAC and 8C77) it runs BIOS-only, with the CPU temperature from 0x23 and the GPU
+    // from the graphics driver. Otherwise the legacy EC default layout, with a warning.
+    public static class UnknownBoard {
+
+        public static FanControlKind Decide(int? fanCount, byte[] levels, bool thermalPolicyV1) {
+            return fanCount.HasValue && fanCount.Value >= 1
+                && levels != null && levels.Length >= 2
+                && thermalPolicyV1
+                ? FanControlKind.Bios : FanControlKind.Ec;
+        }
+
+    }
+
+    // Printable ASCII in an EC image: a register inside a run of printable characters is
+    // most likely part of a string (an ID, a battery name, the EC's SMBus buffer), not a
+    // fan or temperature register. Temperatures between 32 and 126 are printable too, so
+    // this refuses some real sensors; refusing is the safe side.
+    public static class PrintableRun {
+
+        // The shortest run that counts as a string
+        public const int MinRun = 4;
+
+        public static bool IsPrintable(byte value) {
+            return value >= 0x20 && value <= 0x7E;
+        }
+
+        // Whether any of the size bytes at index, or the byte on either side of them, is
+        // part of a run of at least minRun printable bytes
+        public static bool Touches(byte[] image, int index, int size = 1, int minRun = MinRun) {
+            if(image == null)
+                return false;
+            for(int i = index - 1; i <= index + size; i++) {
+                if(i < 0 || i >= image.Length || !IsPrintable(image[i]))
+                    continue;
+                int from = i, to = i;
+                while(from > 0 && IsPrintable(image[from - 1])) from--;
+                while(to < image.Length - 1 && IsPrintable(image[to + 1])) to++;
+                if(to - from + 1 >= minRun)
+                    return true;
+            }
+            return false;
         }
 
     }

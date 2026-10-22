@@ -32,6 +32,7 @@ namespace OmenMon.Tests.Fakes {
         public Fake8BacBios Bios { get; } = new Fake8BacBios();
         public FakeEcRegisters Ec { get; } = new FakeEcRegisters();
         public FakeSettings Settings { get; } = new FakeSettings();
+        public FakeGpuDriver GpuDriver { get; } = new FakeGpuDriver();
         public FakeEmbeddedController? Driver { get; }
         public BiosCtl BiosCtl { get; }
         public FanArray Fans { get; }
@@ -107,7 +108,7 @@ namespace OmenMon.Tests.Fakes {
             IPlatformReadComponent[] temperature = new IPlatformReadComponent[] { cput, gptm, bios };
             bool[] use = new bool[] { true, true, false };
             if(preset != null && preset.IsBiosOnly)
-                temperature = Platform.CreateTemperatures(preset, out use, sensors, this.BiosCtl);
+                temperature = Platform.CreateTemperatures(preset, out use, sensors, this.BiosCtl, this.GpuDriver);
 
             this.Platform = new Platform(this.Settings, this.Fans, temperature, use, preset);
 

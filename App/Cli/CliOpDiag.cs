@@ -236,6 +236,10 @@ namespace OmenMon.AppCli {
 
                 sb.AppendLine($"- Fan control: `{fans.Control}`" + (fans.Control == OmenMon.Core.FanControlKind.Bios ? " (no EC fan register is read or written; RPM = BIOS 0x2D speed x 100)" : ""));
                 sb.AppendLine($"- Mode: `{(fans.GetMode()?.ToString() ?? "unknown")}`, Manual: `{fans.GetManual()}`, Max: `{fans.GetMax()}`, Off: `{fans.GetOff()}`, Countdown: `{fans.GetCountdown()}` s");
+                if(platform.UnverifiedEcLayout)
+                    sb.AppendLine("- **Warning:** no model entry, and the BIOS fan interface does not answer: the default EC layout is used, not verified for this board");
+                else if(platform.IsUnknownBoard)
+                    sb.AppendLine("- No model entry: the BIOS fan interface answers, so the board runs BIOS fan control (CPU from BIOS 0x23, GPU from the graphics driver while awake)");
                 foreach(string refused in AbsentComponent.Refused)
                     sb.AppendLine($"- Refused EC write: {refused}");
                 sb.AppendLine();

@@ -71,6 +71,21 @@ namespace OmenMon.Hardware.Platform {
         public bool IsBiosOnly {
             get { return this.FanControl == FanControlKind.Bios; }
         }
+
+        // A BIOS-only board without a GPU register reads the GPU from the graphics driver
+        // while the dGPU is awake. Only the preset made for an unknown board sets it (F3);
+        // it is not saved with a model.
+        public bool TempGpuFromDriver;
+
+        // The preset of a board without a model entry whose BIOS fan interface answers
+        // (UnknownBoard.Decide): BIOS-only, CPU from BIOS 0x23, GPU from the driver
+        public static PlatformPreset ForUnknownBiosBoard(string productId) {
+            return new PlatformPreset {
+                ProductId = productId,
+                DisplayName = "Unknown board (" + productId + "), BIOS fan control",
+                FanControl = FanControlKind.Bios,
+                TempGpuFromDriver = true };
+        }
 #endregion
 
 #region Default

@@ -449,6 +449,55 @@ namespace OmenMon.Hardware.Platform {
 
     }
 
+    // A GPU temperature from the graphics driver. TryRead gives a temperature only while
+    // the dGPU is awake (it must never wake a parked one); false otherwise or if the
+    // driver cannot be read.
+    public interface IGpuTemperatureSource {
+        bool TryRead(out int celsius);
+    }
+
+    // The GPU temperature of a board without a GPU register (an unknown board running
+    // BIOS-only): the graphics driver's reading while the dGPU is awake. While it is
+    // parked, or the driver does not answer, there is no reading: after the GPU has read
+    // once that is "unknown", which the fan-safety guard treats as hot (F3 as designed;
+    // an EC GPU register reads 0 for a parked GPU, the driver gives nothing to tell the
+    // two apart by).
+    public class GpuDriverTemperatureComponent : PlatformComponentAbstract, IPlatformReadComponent {
+
+        private readonly IGpuTemperatureSource source;
+
+        public GpuDriverTemperatureComponent(IGpuTemperatureSource source, int constraint = int.MaxValue) {
+            this.source = source;
+            this.AccessType = PlatformData.AccessType.Read;
+            this.Constraint = constraint;
+            this.LinkType = PlatformData.LinkType.WmiBios;
+            this.Size = PlatformData.DataSize.Byte;
+            this.Name = "GPTM";
+        }
+
+        protected override int Read() {
+            TryRead(out int value);
+            return value;
+        }
+
+        protected override bool TryRead(out int value) {
+            value = 0;
+            try {
+                if(this.source != null && this.source.TryRead(out int celsius)) {
+                    value = celsius;
+                    return true;
+                }
+            } catch { }
+            return false;
+        }
+
+        // 0 is not a reading (a valid one is a plausible temperature)
+        protected override bool IsValidValue(int value) {
+            return value > 0 && value <= this.Constraint;
+        }
+
+    }
+
     // Implements a BIOS Temperature component
     public class WmiBiosTemperatureComponent : PlatformComponentAbstract, IPlatformReadComponent {
 

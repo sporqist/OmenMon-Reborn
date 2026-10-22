@@ -2,14 +2,33 @@
  //  \\  Copyright © 2023 Piotr Szczepański * License: GPL3
      //  https://omenmon.github.io/
 // OmenMon-Reborn additions © 2026 seakyy
+// Fork additions © 2026 Marius Alwan Meyer (sporqist)
 
+using OmenMon.Core;
 using OmenMon.Hardware.Ec;
 using OmenMon.Library;
 
 namespace OmenMon.Hardware.Platform {
 
-    // Safely detects EC register layout for unknown device models via read-only heuristics
+    // Safely detects EC register layout for unknown device models via read-only heuristics.
+    //
+    // What it suggests is never a control register (F3): the result is a BIOS-only model
+    // (FanControl Bios) with no EC fan register at all; the layout it recognised only
+    // names it. It could suggest read registers (temperature, RPM), but suggests none: an
+    // unverified register is exactly what the default layout got wrong on 8C77 (the
+    // default fan registers there are an ID string, the EC's SMBus host interface and the
+    // battery serial), and BIOS 0x23 / 0x2D already give the CPU temperature and the fan
+    // speeds. A candidate whose bytes, or whose neighbours, are part of a printable ASCII
+    // run of 4 or more is refused: then nothing is detected.
     public static class AutoDetector {
+
+        // The registers the heuristic looks at (offset, size): CPUT 0x57, the RPM word at
+        // 0xB0, the 2022 and 2023+ fan-level registers
+        internal static readonly (byte Register, int Size)[] SignalRegisters = {
+            ((byte) EmbeddedControllerData.Register.CPUT, 1),
+            ((byte) EmbeddedControllerData.Register.RPM1, 2),
+            (PlatformPreset.Default.FanLevelReg0, 1),
+            (PlatformPreset.Default2023.FanLevelReg0, 1) };
 
         // Reads all 256 EC registers safely (read-only, no writes to hardware)
         // delegates to Hw.EcDump to perform the dump atomically under a single lock
@@ -22,7 +41,23 @@ namespace OmenMon.Hardware.Platform {
         // Never writes to any EC register.
         public static PlatformPreset DetectHeuristic(string productId) {
             try {
-                byte[] ec = DumpEc();
+                return Detect(productId, DumpEc());
+            } catch {
+                return null;
+            }
+        }
+
+        // The same on a given EC image (the tests' entry point)
+        internal static PlatformPreset Detect(string productId, byte[] ec) {
+            try {
+                if(ec == null || ec.Length < 256)
+                    return null;
+
+                // A signal register inside a string: the layout cannot be told, and
+                // nothing is suggested
+                foreach(var signal in SignalRegisters)
+                    if(PrintableRun.Touches(ec, signal.Register, signal.Size))
+                        return null;
 
                 byte cput   = ec[(byte) EmbeddedControllerData.Register.CPUT]; // 0x57
                 byte rpm1Lo = ec[(byte) EmbeddedControllerData.Register.RPM1]; // 0xB0
@@ -84,23 +119,13 @@ namespace OmenMon.Hardware.Platform {
             return null;
         }
 
-        // Copies a preset template, stamping in the detected productId and displayName
+        // The model to save for a recognised layout: BIOS-only, with no EC fan register
+        // (none of the template's registers is copied; the template only names the layout)
         private static PlatformPreset FromTemplate(string productId, PlatformPreset t, string label) {
             return new PlatformPreset {
-                ProductId        = productId,
-                DisplayName      = $"Auto-detected {label} ({productId})",
-                FanLevelReg0     = t.FanLevelReg0,
-                FanLevelReg1     = t.FanLevelReg1,
-                FanRateReadReg0  = t.FanRateReadReg0,
-                FanRateReadReg1  = t.FanRateReadReg1,
-                FanRateWriteReg0 = t.FanRateWriteReg0,
-                FanRateWriteReg1 = t.FanRateWriteReg1,
-                FanSpeedReg0     = t.FanSpeedReg0,
-                FanSpeedReg1     = t.FanSpeedReg1,
-                CountdownReg     = t.CountdownReg,
-                ManualReg        = t.ManualReg,
-                ModeReg          = t.ModeReg,
-                SwitchReg        = t.SwitchReg
+                ProductId   = productId,
+                DisplayName = $"Auto-detected {label}, BIOS fan control ({productId})",
+                FanControl  = FanControlKind.Bios
             };
         }
 

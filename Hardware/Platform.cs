@@ -71,11 +71,15 @@ namespace OmenMon.Hardware.Platform {
             // Initialize the system settings — must run first so GetProduct() is available.
             InitSystem();
 
-            // Resolve the model preset once and reuse for both fans and temperature.
+            // Resolve the model preset once and reuse for both fans and temperature. A
+            // board without an entry runs BIOS-only if the BIOS fan interface answers,
+            // otherwise on the legacy default layout (see ResolvePreset)
             string product = this.System.GetProduct();
-            this.Preset = Config.Models.ContainsKey(product)
-                ? Config.Models[product]
-                : PlatformPreset.Default;
+            this.Preset = ResolvePreset(product, ProbeBiosFanInterface, out bool unverified);
+            this.UnverifiedEcLayout = unverified;
+            this.IsUnknownBoard = product == null || !Config.Models.ContainsKey(product);
+            if(unverified)
+                global::System.Diagnostics.Trace.WriteLine("OmenMon: board " + product + " has no model entry and its BIOS fan interface does not answer: the default EC layout is used, its registers are not verified");
 
             // Initialize the fan controls
             InitFans();
@@ -109,6 +113,49 @@ namespace OmenMon.Hardware.Platform {
 
             InitFanSafety();
 
+        }
+
+        // Whether this board runs on the legacy default EC layout without a model entry
+        // (its registers not verified for it): the GUI warns once
+        public bool UnverifiedEcLayout { get; private set; }
+
+        // Whether this board has no model entry
+        public bool IsUnknownBoard { get; private set; }
+
+        // What the BIOS fan interface answers, for a board without a model entry
+        internal struct BiosFanProbe {
+            public int? FanCount;      // 0x10
+            public byte[] Levels;      // 0x2D, null if the call failed
+            public bool ThermalPolicyV1;
+        }
+
+        // The model preset for a board: its entry, or for a board without one
+        // (UnknownBoard.Decide in the core) BIOS-only if the BIOS fan interface answers,
+        // else the legacy default layout (unverified = true). probe is only called for a
+        // board without an entry.
+        internal static PlatformPreset ResolvePreset(string product, Func<BiosFanProbe> probe, out bool unverified) {
+            unverified = false;
+            if(product != null && Config.Models.ContainsKey(product))
+                return Config.Models[product];
+            BiosFanProbe answer = default(BiosFanProbe);
+            try { answer = probe(); } catch { }
+            if(UnknownBoard.Decide(answer.FanCount, answer.Levels, answer.ThermalPolicyV1) == FanControlKind.Bios)
+                return PlatformPreset.ForUnknownBiosBoard(product);
+            unverified = true;
+            return PlatformPreset.Default;
+        }
+
+        // Asks the live BIOS (reads only: 0x10 fan count, 0x2D levels, the system data)
+        private BiosFanProbe ProbeBiosFanInterface() {
+            BiosFanProbe answer = default(BiosFanProbe);
+            try {
+                if(Hw.Bios == null || !Hw.Bios.IsInitialized)
+                    return answer;
+                answer.FanCount = Hw.BiosGet(Hw.Bios.GetFanCount);
+                answer.Levels = Hw.BiosGet(Hw.Bios.GetFanLevel);
+                answer.ThermalPolicyV1 = this.System.GetSystemData().ThermalPolicy == BiosData.ThermalPolicyVersion.V1;
+            } catch { }
+            return answer;
         }
 
         // How this platform's fans are controlled (the model's FanControl)
@@ -239,10 +286,10 @@ namespace OmenMon.Hardware.Platform {
         // it names, nothing else (BiosFanControl.Sensors); an EC model gets the
         // configured <Temperature> sensors with its overrides, as before.
         internal static IPlatformReadComponent[] CreateTemperatures(PlatformPreset preset, out bool[] use,
-            IEcRegisters registers = null, IBiosCtl bios = null) {
+            IEcRegisters registers = null, IBiosCtl bios = null, IGpuTemperatureSource gpuDriver = null) {
 
             if(preset.IsBiosOnly) {
-                TemperatureSensorPlan[] plan = BiosFanControl.Sensors(preset.TempCpuReg, preset.TempGpuReg);
+                TemperatureSensorPlan[] plan = BiosFanControl.Sensors(preset.TempCpuReg, preset.TempGpuReg, preset.TempGpuFromDriver);
                 IPlatformReadComponent[] sensors = new IPlatformReadComponent[plan.Length];
                 use = new bool[plan.Length];
                 for(int k = 0; k < plan.Length; k++) {
@@ -251,7 +298,9 @@ namespace OmenMon.Hardware.Platform {
                         EcComponent comp = new EcTemperatureComponent(plan[k].Register, Config.MaxBelievableTemperature, registers);
                         comp.SetName(plan[k].Name);
                         sensors[k] = comp;
-                    } else
+                    } else if(plan[k].Source == TemperatureSource.GpuDriver)
+                        sensors[k] = new GpuDriverTemperatureComponent(gpuDriver ?? NvmlGpuTemperature.Instance, Config.MaxBelievableTemperature);
+                    else
                         sensors[k] = new WmiBiosTemperatureComponent(Config.MaxBelievableTemperature, bios);
                 }
                 return sensors;
