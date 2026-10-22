@@ -73,6 +73,7 @@ namespace OmenMon.Tests {
                 <ManualReg>98</ManualReg>
                 <ModeReg>149</ModeReg>
                 <SwitchReg>244</SwitchReg>
+                <TempGpuFromDriver>true</TempGpuFromDriver>
             </Model>
             <Model ProductId=""BAD1"" DisplayName=""EC board without a switch register"">
                 <FanLevelReg0>52</FanLevelReg0>
@@ -130,6 +131,19 @@ namespace OmenMon.Tests {
                 <FanControl>Bios</FanControl>
                 <DisplaySensor Name=""SKTB"">179</DisplaySensor>
                 <DisplaySensor Name=""SKTB"">180</DisplaySensor>
+            </Model>
+            <!-- a BIOS-only board without a GPU register: the GPU from the driver -->
+            <Model ProductId=""BIO3"" DisplayName=""BIOS-only board, GPU from the driver"">
+                <FanControl>Bios</FanControl>
+                <TempGpuFromDriver>true</TempGpuFromDriver>
+            </Model>
+            <Model ProductId=""BIO4"" DisplayName=""BIOS-only board, GPU not from the driver"">
+                <FanControl>Bios</FanControl>
+                <TempGpuFromDriver>false</TempGpuFromDriver>
+            </Model>
+            <Model ProductId=""BAD7"" DisplayName=""TempGpuFromDriver is not a bool"">
+                <FanControl>Bios</FanControl>
+                <TempGpuFromDriver>yes</TempGpuFromDriver>
             </Model>
         </Models>
     </Config>
@@ -201,6 +215,35 @@ namespace OmenMon.Tests {
             Assert.Equal(Norm(saved.Replace("renamed", "BIOS-only board")), Norm(File.ReadAllText(File_)));
         }
 
+        // The GPU from the driver round-trips: a BIOS-only model loads with it ("false"
+        // or absent: without), is saved with it when rebuilt from memory and loads back
+        // with its GPU sensor; an EC model ignores it
+        [Fact]
+        public void BiosModel_TempGpuFromDriver_LoadsSavesAndLoadsAgain() {
+            File.WriteAllText(File_, Fixture);
+            Config.Load();
+            Assert.True(Config.Models["BIO3"].TempGpuFromDriver);
+            Assert.False(Config.Models["BIO4"].TempGpuFromDriver);
+            Assert.False(Config.Models["8C77"].TempGpuFromDriver);
+            Assert.False(Config.Models["EC01"].TempGpuFromDriver);
+
+            Config.Models["BIO3"].DisplayName = "renamed";
+            Config.Models["BIO4"].DisplayName = "renamed too";
+            Config.Save();
+            string text = File.ReadAllText(File_);
+            Assert.Contains("<TempGpuFromDriver>true</TempGpuFromDriver>",
+                Regex.Match(text, @"<Model ProductId=""BIO3""[\s\S]*?</Model>").Value);
+            Assert.DoesNotContain("TempGpuFromDriver", Regex.Match(text, @"<Model ProductId=""BIO4""[\s\S]*?</Model>").Value);
+
+            Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
+            Config.Load();
+            Assert.Equal("renamed", Config.Models["BIO3"].DisplayName);
+            Assert.True(Config.Models["BIO3"].TempGpuFromDriver);
+            Assert.False(Config.Models["BIO4"].TempGpuFromDriver);
+            using var rig = new TestRig(preset: Config.Models["BIO3"]);
+            Assert.Equal(new[] { "GPTM", "BIOS" }, rig.Platform.Temperature.Select(s => s.GetName()));
+        }
+
         // A malformed entry is not loaded, the reason is recorded (for -Diag), and the
         // file keeps the entry; nothing is read as 0
         [Fact]
@@ -213,13 +256,15 @@ namespace OmenMon.Tests {
             Assert.False(Config.Models.ContainsKey("BAD4"));
             Assert.False(Config.Models.ContainsKey("BAD5"));
             Assert.False(Config.Models.ContainsKey("BAD6"));
+            Assert.False(Config.Models.ContainsKey("BAD7"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD1") && p.Contains("SwitchReg") && p.Contains("missing"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD2") && p.Contains("FanLevelReg1") && p.Contains("0xZZ"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD3") && p.Contains("Smm"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD4") && p.Contains("Verified") && p.Contains("maybe"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD5") && p.Contains("CPUT"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD6") && p.Contains("twice"));
-            Assert.Equal(6, Config.ModelLoadProblems.Count);
+            Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD7") && p.Contains("TempGpuFromDriver") && p.Contains("yes"));
+            Assert.Equal(7, Config.ModelLoadProblems.Count);
 
             Config.Save();
             string text = File.ReadAllText(File_);
@@ -332,7 +377,8 @@ namespace OmenMon.Tests {
         }
 
         // T4: what the unknown-model prompt saves (Config.SaveModel of the detector's
-        // result) has no control register, and loads back as a BIOS-only model
+        // result) has no control register, and loads back as a BIOS-only model that
+        // reads the GPU from the driver
         [Fact]
         public void UnknownModelPrompt_SavesNoControlRegister() {
             File.WriteAllText(File_, Fixture);
@@ -349,9 +395,25 @@ namespace OmenMon.Tests {
             foreach(string reg in new[] { "FanLevelReg", "FanRate", "FanSpeedReg", "CountdownReg", "ManualReg", "ModeReg", "SwitchReg", "TempCpuReg", "TempGpuReg" })
                 Assert.DoesNotContain(reg, entry);
 
+            Assert.Contains("<TempGpuFromDriver>true</TempGpuFromDriver>", entry);
+
+            // After a restart the board has its entry: BIOS-only, with the GPU from the
+            // driver as before the restart (not probed again)
             Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
             Config.Load();
-            Assert.True(Config.Models["9ZZZ"].IsBiosOnly);
+            PlatformPreset saved = Platform.ResolvePreset("9ZZZ", () => throw new InvalidOperationException(), out bool unverified);
+            Assert.Same(Config.Models["9ZZZ"], saved);
+            Assert.False(unverified);
+            Assert.True(saved.IsBiosOnly);
+            Assert.True(saved.TempGpuFromDriver);
+
+            using var rig = new TestRig(preset: saved);
+            Assert.Equal(new[] { "GPTM", "BIOS" }, rig.Platform.Temperature.Select(s => s.GetName()));
+            rig.GpuDriver.Celsius = 61;
+            rig.SetCpuTemperature(50);
+            rig.Platform.UpdateTemperature();
+            Assert.Equal(61, rig.Platform.GetGpuReading().Last.Value);
+            Assert.Equal(61, rig.Platform.GetMaxTemperature(false));
         }
 
         // A BIOS-only model loaded from the configuration builds a fan array without an EC

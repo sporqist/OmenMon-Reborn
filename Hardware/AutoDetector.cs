@@ -18,7 +18,8 @@ namespace OmenMon.Hardware.Platform {
     // unverified register is exactly what the default layout got wrong on 8C77 (the
     // default fan registers there are an ID string, the EC's SMBus host interface and the
     // battery serial), and BIOS 0x23 / 0x2D already give the CPU temperature and the fan
-    // speeds. A candidate whose bytes, or whose neighbours, are part of a printable ASCII
+    // speeds; the GPU is read from the graphics driver, as on an unknown board that runs
+    // BIOS-only (PlatformPreset.ForUnknownBiosBoard). A candidate whose bytes, or whose neighbours, are part of a printable ASCII
     // run of 4 or more is refused: then nothing is detected.
     public static class AutoDetector {
 
@@ -120,12 +121,14 @@ namespace OmenMon.Hardware.Platform {
         }
 
         // The model to save for a recognised layout: BIOS-only, with no EC fan register
-        // (none of the template's registers is copied; the template only names the layout)
+        // (none of the template's registers is copied; the template only names the layout),
+        // the GPU from the driver
         private static PlatformPreset FromTemplate(string productId, PlatformPreset t, string label) {
             return new PlatformPreset {
-                ProductId   = productId,
-                DisplayName = $"Auto-detected {label}, BIOS fan control ({productId})",
-                FanControl  = FanControlKind.Bios
+                ProductId         = productId,
+                DisplayName       = $"Auto-detected {label}, BIOS fan control ({productId})",
+                FanControl        = FanControlKind.Bios,
+                TempGpuFromDriver = true
             };
         }
 

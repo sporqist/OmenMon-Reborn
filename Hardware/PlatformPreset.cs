@@ -95,8 +95,9 @@ namespace OmenMon.Hardware.Platform {
         }
 
         // A BIOS-only board without a GPU register reads the GPU from the graphics driver
-        // while the dGPU is awake. Only the preset made for an unknown board sets it (F3);
-        // it is not saved with a model.
+        // while the dGPU is awake. Set by the preset made for an unknown board (F3) and by
+        // the model the unknown-model scan saves (AutoDetector), which keeps it as
+        // <TempGpuFromDriver>true</TempGpuFromDriver>. BIOS-only models only.
         public bool TempGpuFromDriver;
 
         // The preset of a board without a model entry whose BIOS fan interface answers

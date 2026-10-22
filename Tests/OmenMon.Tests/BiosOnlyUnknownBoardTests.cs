@@ -173,7 +173,8 @@ namespace OmenMon.Tests {
             }
         }
 
-        // T4: what the detector suggests is a BIOS-only model without a control register
+        // T4: what the detector suggests is a BIOS-only model without a control register,
+        // the GPU from the driver (as an unknown board that runs BIOS-only)
         [Fact]
         public void AutoDetector_SuggestsNoControlRegister() {
             foreach(byte[] ec in new[] { Image2022(), Image2023() }) {
@@ -185,6 +186,7 @@ namespace OmenMon.Tests {
                     p.CountdownReg, p.ManualReg, p.ModeReg, p.SwitchReg });
                 Assert.Equal(0, p.TempCpuReg);
                 Assert.Equal(0, p.TempGpuReg);
+                Assert.True(p.TempGpuFromDriver);
             }
         }
 

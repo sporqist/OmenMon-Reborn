@@ -815,6 +815,20 @@ namespace OmenMon.Library {
             preset.TempCpuReg = read(XmlElementTempCpuReg, false, 0);
             preset.TempGpuReg = read(XmlElementTempGpuReg, false, 0);
 
+            // Whether a BIOS-only model without a GPU register reads the GPU from the
+            // graphics driver (<TempGpuFromDriver>true</TempGpuFromDriver>, what the
+            // unknown-model scan saves); absent: no. An EC model never does and ignores it.
+            XmlNode fromDriver = node[XmlElementTempGpuFromDriver];
+            if(ok && preset.IsBiosOnly && fromDriver != null) {
+                string text = fromDriver.InnerText.Trim();
+                if(text == XmlSaveBoolTrue)
+                    preset.TempGpuFromDriver = true;
+                else if(text != XmlSaveBoolFalse) {
+                    ok = false;
+                    why = "Model " + productId + ": <" + XmlElementTempGpuFromDriver + "> is '" + text + "', expected " + XmlSaveBoolTrue + " or " + XmlSaveBoolFalse;
+                }
+            }
+
             // Whether the mode register is verified to hold what BIOS 0x1A last sent
             // (<ModeReg Verified="true">): only then is a mode read from it sent again. On a
             // BIOS-only model ModeReg is optional and used only if verified (an unverified
@@ -1617,13 +1631,15 @@ namespace OmenMon.Library {
             mnode.SetAttribute(XmlAttrModelProductId, p.ProductId ?? "");
             mnode.SetAttribute(XmlAttrModelDisplayName, p.DisplayName ?? "");
 
-            // A BIOS-only model: its kind and its temperature registers, no EC fan register
+            // A BIOS-only model: its kind and its temperature sources, no EC fan register
             if(p.IsBiosOnly) {
                 mnode.AppendChild(xml.CreateElement(XmlElementFanControl)).InnerText = XmlFanControlBios;
                 if(p.TempCpuReg != 0)
                     mnode.AppendChild(xml.CreateElement(XmlElementTempCpuReg)).InnerText = Conv.GetString((uint) p.TempCpuReg, 1, 10);
                 if(p.TempGpuReg != 0)
                     mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
+                if(p.TempGpuFromDriver)
+                    mnode.AppendChild(xml.CreateElement(XmlElementTempGpuFromDriver)).InnerText = XmlSaveBoolTrue;
                 if(p.ModeRegVerified && p.ModeReg != 0)
                     BuildModeReg(xml, mnode, p);
                 BuildDisplaySensors(xml, mnode, p);

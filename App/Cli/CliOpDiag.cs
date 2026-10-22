@@ -171,6 +171,8 @@ namespace OmenMon.AppCli {
                 if(Config.Models != null && Config.Models.TryGetValue(productId, out PlatformPreset preset)) {
                     sb.AppendLine($"- Native preset: **{preset.DisplayName ?? "(no DisplayName)"}**");
                     sb.AppendLine($"- Fan control: `{preset.FanControl}`" + (preset.IsBiosOnly ? " (the EC fan registers below are not used)" : ""));
+                    if(preset.IsBiosOnly && preset.TempGpuReg == 0 && preset.TempGpuFromDriver)
+                        sb.AppendLine("- GPU temperature: from the graphics driver (NVML) while the dGPU is awake");
                     sb.AppendLine();
                     sb.AppendLine("| Register | Value (dec) | Value (hex) |");
                     sb.AppendLine("|----------|-------------|-------------|");
