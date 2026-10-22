@@ -59,6 +59,10 @@ namespace OmenMon.Hardware.Platform {
         // calibration on such a board pinned temperature bytes as RPM)
         private readonly bool speedFromBios;
 
+        // BIOS-only model: this fan's maximum in the BIOS fan table (0x2F; 0 while it
+        // cannot be read), against which its rate is shown (BiosFanControl.RatePercent)
+        private readonly Func<int> rateMaximum;
+
         // Constructs a fan instance
         public Fan(
             BiosData.FanType type,
@@ -67,10 +71,12 @@ namespace OmenMon.Hardware.Platform {
             IPlatformWriteComponent rateWrite,
             IPlatformReadComponent speed,
             IBiosCtl bios = null,
-            bool speedFromBios = false) {
+            bool speedFromBios = false,
+            Func<int> rateMaximum = null) {
 
             this.bios = bios;
             this.speedFromBios = speedFromBios;
+            this.rateMaximum = rateMaximum;
             this.FanType = type;
             this.Level = level;
             this.RateRead = rateRead;
@@ -93,8 +99,11 @@ namespace OmenMon.Hardware.Platform {
             return levels[(int) this.FanType - 1];
         }
 
-        // Retrieves the fan rate [%]
+        // Retrieves the fan rate [%]. BIOS-only: the BIOS level against the fan table's
+        // top row (-1 while that cannot be read), never an EC register
         public virtual int GetRate() {
+            if(this.speedFromBios)
+                return BiosFanControl.RatePercent(GetLevel(), this.rateMaximum != null ? this.rateMaximum() : 0);
             this.RateRead.Update();
             return this.RateRead.GetValue();
         }

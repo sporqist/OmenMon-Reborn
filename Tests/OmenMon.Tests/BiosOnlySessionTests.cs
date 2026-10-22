@@ -269,8 +269,9 @@ namespace OmenMon.Tests {
             Assert.Contains(rig.Ec.Writes, w => w.Register == 0xF4);
         }
 
-        // On a BIOS-only model the speed is BIOS 0x2D x 100, the rate, the mode and
-        // the manual/switch registers are unknown or come from the guard
+        // On a BIOS-only model the speed is BIOS 0x2D x 100, the rate the 0x2D level
+        // against the fan table's top row, the mode and the manual/switch registers are
+        // unknown or come from the guard
         [Fact]
         public void BiosOnly_ReadsComeFromTheBiosAndTheGuard() {
             using var rig = new TestRig(preset: Board8C77());
@@ -284,7 +285,8 @@ namespace OmenMon.Tests {
             Assert.False(fans.GetOff());       // 0xF4 = 0x02 would say "off" on the legacy path
             Assert.False(fans.GetManual());
             Assert.Equal(0, fans.GetCountdown());
-            Assert.Equal(AbsentComponent.Unknown, fans.Fan[0].GetRate());
+            Assert.Equal(BiosFanControl.RatePercent(rig.Bios.MeasuredLevels[0], 52), fans.Fan[0].GetRate());   // table top row 52/55
+            Assert.Equal(BiosFanControl.RatePercent(rig.Bios.MeasuredLevels[1], 55), fans.Fan[1].GetRate());
             Assert.Equal(rig.Bios.MeasuredLevels[0] * 100, fans.Fan[0].GetSpeed());
             Assert.Equal(rig.Bios.MeasuredLevels[1] * 100, fans.Fan[1].GetSpeed());
 

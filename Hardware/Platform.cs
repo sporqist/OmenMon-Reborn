@@ -201,17 +201,25 @@ namespace OmenMon.Hardware.Platform {
             const PlatformData.DataSize B = PlatformData.DataSize.Byte;
             const PlatformData.DataSize Wd = PlatformData.DataSize.Word;
 
+            // A BIOS-only fan's rate is its level against the fan table's top row, which the
+            // fan array reads (and caches)
+            FanArray biosOnly = null;
+            Func<int, Func<int>> tableMaximum = fan => () => {
+                byte[] top = biosOnly?.GetTableMaximum();
+                return top != null ? top[fan] : 0;
+            };
+
             if(preset.IsBiosOnly)
-                return new FanArray(
+                return biosOnly = new FanArray(
                     new IFan[] {
                         new Fan(BiosData.FanType.Cpu,
                             new AbsentComponent("FanLevel0"), new AbsentComponent("FanRateRead0"),
                             new AbsentComponent("FanRateWrite0"), new AbsentComponent("FanSpeed0"),
-                            bios, true),
+                            bios, true, tableMaximum(0)),
                         new Fan(BiosData.FanType.Gpu,
                             new AbsentComponent("FanLevel1"), new AbsentComponent("FanRateRead1"),
                             new AbsentComponent("FanRateWrite1"), new AbsentComponent("FanSpeed1"),
-                            bios, true) },
+                            bios, true, tableMaximum(1)) },
                     new AbsentComponent("Countdown"),
                     new AbsentComponent("Manual"),
                     preset.ModeRegVerified && preset.ModeReg != 0

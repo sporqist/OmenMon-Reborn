@@ -41,6 +41,18 @@ namespace OmenMon.Core {
             return level <= 0 ? 0 : level * RpmPerLevel;
         }
 
+        // The rate a BIOS-only board shows for a fan [%]: its 0x2D level against that fan's
+        // maximum in the BIOS fan table (0x2F, the top row; 60/63 on 8BAC and 8C77), as a
+        // whole percentage, at most 100. -1 (unknown) without a sane maximum (1-100) or a
+        // level. Nothing from the EC: there is no rate register (and 8C77's EC 0x14 FWPM
+        // keeps the last 0x2E level after it expired, so it is no rate either).
+        public static int RatePercent(int level, int tableMaximum) {
+            if(level < 0 || tableMaximum < 1 || tableMaximum > 100)
+                return -1;
+            int percent = (level * 100 + tableMaximum / 2) / tableMaximum;
+            return percent > 100 ? 100 : percent;
+        }
+
         // Seconds a held level has left: from the last 0x10/0x2E OmenMon sent; 0 if it
         // holds none (null) or the time is up
         public static int HoldSecondsLeft(DateTime? lastRefresh, DateTime now, TimeSpan hold) {

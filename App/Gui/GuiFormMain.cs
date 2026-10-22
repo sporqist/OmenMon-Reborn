@@ -761,8 +761,8 @@ namespace OmenMon.AppGui {
                         s.FanLevel[1], this.TrkFan1Lvl.Minimum, this.TrkFan1Lvl.Maximum);
             } catch { }
 
-            // Update the fan rate [%] (a BIOS-only board has no rate register: unknown,
-            // shown as "--")
+            // Update the fan rate [%] (a BIOS-only board: the BIOS level against the fan
+            // table's top row; "--" while that table cannot be read)
             try {
                 this.BarFan0Rte.Value = s.FanRate[0] < 0 ? 0 : s.FanRate[0];
                 this.BarFan1Rte.Value = s.FanRate[1] < 0 ? 0 : s.FanRate[1];

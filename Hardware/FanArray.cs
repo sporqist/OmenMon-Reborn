@@ -53,6 +53,9 @@ namespace OmenMon.Hardware.Platform {
         // table cannot be read); calling it early reads the table before it is needed
         public byte[] GetPanicLevel();
 
+        // The BIOS fan table's top row per fan (0x2F), null while it cannot be read
+        public byte[] GetTableMaximum();
+
         // Whether the 0x10 heartbeat may run (false shortly after a hand-back)
         public bool HeartbeatAllowed { get; }
 
@@ -353,14 +356,7 @@ namespace OmenMon.Hardware.Platform {
             if(this.panicLevel != null)
                 return new byte[] { this.panicLevel[0], this.panicLevel[1] };
 
-            var rows = new List<(byte Cpu, byte Gpu)>();
-            try {
-                BiosData.FanTable data = this.Bios.GetFanTable();
-                if(data.Level != null)
-                    foreach(BiosData.FanLevel row in data.Level)
-                        rows.Add((row.Fan1Level, row.Fan2Level));
-            } catch { }
-            byte[] table = PanicLevel.TableMaximum(rows);
+            byte[] table = ReadTableMaximum();
 
             if(PanicLevel.IsComplete(table)) {
                 this.panicLevel = table;
@@ -370,6 +366,36 @@ namespace OmenMon.Hardware.Platform {
             FanSafetyPolicy policy = this.Guard != null ? this.Guard.Policy : new FanSafetyPolicy();
             return PanicLevel.Choose(table, Config.FanLevelMax, policy);
 
+        }
+
+        // The fan table's top row per fan, from the same cache as the panic level. While
+        // the table cannot be read: null, and it is asked again at most once a minute (the
+        // rate display asks on every monitor pass)
+        public byte[] GetTableMaximum() {
+            if(this.panicLevel == null) {
+                DateTime now = Now;
+                if(this.tableTriedAt != default(DateTime) && now - this.tableTriedAt < TimeSpan.FromSeconds(60) && now >= this.tableTriedAt)
+                    return null;
+                this.tableTriedAt = now;
+                byte[] table = ReadTableMaximum();
+                if(!PanicLevel.IsComplete(table))
+                    return null;
+                this.panicLevel = table;
+            }
+            return new byte[] { this.panicLevel[0], this.panicLevel[1] };
+        }
+        private DateTime tableTriedAt;
+
+        // Reads the fan table (0x2F) and returns its highest level per fan
+        private byte[] ReadTableMaximum() {
+            var rows = new List<(byte Cpu, byte Gpu)>();
+            try {
+                BiosData.FanTable data = this.Bios.GetFanTable();
+                if(data.Level != null)
+                    foreach(BiosData.FanLevel row in data.Level)
+                        rows.Add((row.Fan1Level, row.Fan2Level));
+            } catch { }
+            return PanicLevel.TableMaximum(rows);
         }
 
         // On boards like 8BAC a 0x2E fan-level call only takes effect within ~30 s after
