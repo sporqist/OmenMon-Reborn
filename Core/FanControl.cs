@@ -50,6 +50,15 @@ namespace OmenMon.Core {
             return left <= 0 ? 0 : (int) Math.Ceiling(left);
         }
 
+        // Whether the calibration wizard may run. It writes EC registers (manual, switch,
+        // countdown, rate) and searches the EC for a tachometer, so only on a model whose
+        // EC map is verified: an entry of kind Ec (modelControl; null: no entry), with
+        // the fans running on it. Never on a BIOS-only board (its speed is BIOS 0x2D,
+        // nothing to calibrate) nor on a board without an entry.
+        public static bool CalibrationAllowed(FanControlKind? modelControl, FanControlKind running) {
+            return modelControl == FanControlKind.Ec && running == FanControlKind.Ec;
+        }
+
         // Whether the level OmenMon holds has both fans off (0/0)
         public static bool IsOff(byte[] written) {
             return written != null && written.Length >= 2 && written[0] == 0 && written[1] == 0;

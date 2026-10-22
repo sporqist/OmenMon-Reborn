@@ -195,9 +195,9 @@ namespace OmenMon.Hardware.Platform {
         // EC fan register.
         internal static FanArray CreateFanArray(PlatformPreset preset, IEcRegisters registers = null, IBiosCtl bios = null) {
 
+            // (the rate-write register is readable too: the wizard puts back what it held)
             const PlatformData.AccessType R = PlatformData.AccessType.Read;
-            const PlatformData.AccessType W = PlatformData.AccessType.Write;
-            const PlatformData.AccessType RW = R | W;
+            const PlatformData.AccessType RW = R | PlatformData.AccessType.Write;
             const PlatformData.DataSize B = PlatformData.DataSize.Byte;
             const PlatformData.DataSize Wd = PlatformData.DataSize.Word;
 
@@ -229,7 +229,7 @@ namespace OmenMon.Hardware.Platform {
                         BiosData.FanType.Cpu,
                         new EcComponent(preset.FanLevelReg0, RW, B, int.MaxValue, registers),
                         new EcComponent(preset.FanRateReadReg0, R, B, int.MaxValue, registers),
-                        new EcComponent(preset.FanRateWriteReg0, W, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanRateWriteReg0, RW, B, int.MaxValue, registers),
                         new EcComponent(preset.FanSpeedReg0, R, Wd, int.MaxValue, registers),
                         bios),
 
@@ -238,7 +238,7 @@ namespace OmenMon.Hardware.Platform {
                         BiosData.FanType.Gpu,
                         new EcComponent(preset.FanLevelReg1, RW, B, int.MaxValue, registers),
                         new EcComponent(preset.FanRateReadReg1, R, B, int.MaxValue, registers),
-                        new EcComponent(preset.FanRateWriteReg1, W, B, int.MaxValue, registers),
+                        new EcComponent(preset.FanRateWriteReg1, RW, B, int.MaxValue, registers),
                         new EcComponent(preset.FanSpeedReg1, R, Wd, int.MaxValue, registers),
                         bios) },
 

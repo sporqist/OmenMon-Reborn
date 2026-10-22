@@ -206,11 +206,14 @@ namespace OmenMon.Hardware.Platform {
             return this.Countdown.GetValue();
         }
 
-        // Sets the countdown value [s]. BIOS-only: nothing (there is no countdown register)
+        // Sets the countdown value [s], clamped to what the register holds (a byte: 0-255;
+        // 600 used to be written as 600 & 0xFF = 88). BIOS-only: nothing (there is no
+        // countdown register)
         public void SetCountdown(int countdown) {
             if(this.Control == FanControlKind.Bios)
                 return;
-            this.Countdown.SetValue(countdown);
+            int max = (int) this.Countdown.GetDataSize();
+            this.Countdown.SetValue(Math.Max(0, Math.Min(max, countdown)));
         }
 
         // The time for the hold countdown and the arm interval
@@ -545,11 +548,13 @@ namespace OmenMon.Hardware.Platform {
         //   8E35 — HP Victus 15 (2026 BIOS)               — issue #57 (ClockworkNirvana,
         //          confirmed via raw EC-dump analysis: 70 % → 100 % shows 0 RPM gain on
         //          GPU and a 16 RPM regression on CPU — the same firmware signature.)
-        //   8C77 — HP Omen 16-wf1012nl (single-fan SKU)   — issue #50 (stf1o, defensive add.
-        //          PeriodEncoded8 reading at EC[0xD2] goes 0xB2 → 0xD0 → 0x99 → 0xEC across
-        //          0/30/70/100 % — the 100 % period is slower than idle, same rate-limiter
-        //          footprint as the boards above. RPM stays sidecar-supported only because
-        //          the <Models> schema is LE16-only and cannot decode PeriodEncoded8.)
+        //   8C77 — HP Omen 16-wf1012nl                    — issue #50 (stf1o, defensive add).
+        //          Correction (2026-10-22): the evidence was a "PeriodEncoded8 tach" at
+        //          EC[0xD2] going 0xB2 → 0xD0 → 0x99 → 0xEC across 0/30/70/100 %. On the
+        //          8BAC and 8C77 ACPI maps 0xD2/0xD3 is BAC0, the battery current (16-bit;
+        //          0 at full charge on AC), not a fan: those numbers fit a sweep run on
+        //          battery. 8C77 has two fans, and its speed is BIOS 0x2D x 100 (the
+        //          BIOS-only model entry). Kept on the list for now (it costs nothing).
         //   88F4 — HP Omen (BIOS rate-limiter freeze)     — issue #67
         //   8748 — HP Omen 17-cb1004ur (2020)             — issue #111 (swo1och, AutoCal
         //          plateau at 70 %: CPU RPM flat at 2929 across 30 -> 70 %, the fan-ceiling

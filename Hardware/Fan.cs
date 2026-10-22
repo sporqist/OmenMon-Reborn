@@ -22,6 +22,10 @@ namespace OmenMon.Hardware.Platform {
         public int GetRate();   // Retrieves the fan rate [%]
         public int GetSpeed();  // Retrieves the fan speed [rpm]
 
+        // Retrieves the byte the rate-write register holds now (what SetRate would
+        // restore), -1 if it cannot be read
+        public int GetRateWrite();
+
         public void SetLevel(int level);  // Sets the fan level [krpm]
         public void SetRate(int rate);    // Sets the fan rate [%]
 
@@ -93,6 +97,16 @@ namespace OmenMon.Hardware.Platform {
         public virtual int GetRate() {
             this.RateRead.Update();
             return this.RateRead.GetValue();
+        }
+
+        // Retrieves the rate-write register's byte, -1 if the register cannot be read
+        // (write-only, absent on a BIOS-only model, or the read failed)
+        public virtual int GetRateWrite() {
+            if(!(this.RateWrite is IPlatformReadComponent read)
+                || !read.GetAccessType().HasFlag(PlatformData.AccessType.Read)
+                || read is AbsentComponent)
+                return -1;
+            return read.Update() ? read.GetValue() : -1;
         }
 
         // Retrieves the fan speed [rpm]

@@ -173,6 +173,13 @@ namespace OmenMon.AppGui {
             try {
                 var fans = Context.Op?.Platform?.Fans;
                 var program = Context.Op?.Program;
+
+                // Not on a board without a verified EC map (W1): say why, open nothing
+                string refusal = CliOp.CalibrationRefusal(fans, Context.Op?.Platform?.System.GetProduct());
+                if(refusal != null) {
+                    MessageBox.Show(refusal, Config.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
                 using(var dlg = new GuiFormCalibration(fans, program)) {
                     dlg.ShowDialog();
                 }

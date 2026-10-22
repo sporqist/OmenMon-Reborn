@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using OmenMon.Core;
 using OmenMon.Hardware.Bios;
 using OmenMon.Hardware.Ec;
 using OmenMon.Hardware.Platform;
@@ -113,7 +114,8 @@ namespace OmenMon.AppCli {
             CancellationToken cancel = default(CancellationToken),
             int[] profile = null,
             IFanArray fans = null,
-            FanProgram program = null) {
+            FanProgram program = null,
+            string product = null) {
 
             var outcome = new CalibrationOutcome();
             profile = profile ?? DefaultProfile;
@@ -128,8 +130,17 @@ namespace OmenMon.AppCli {
             // Settings.GetProduct() can transiently return "?" on a WMI hiccup, so calling it
             // twice risked the report claiming "?" is on the freeze list while the filter ran
             // against the real ID, or vice versa.
-            string productId = SafeProductId();
+            string productId = product ?? SafeProductId();
             outcome.ProductId = productId;
+
+            // W1: never on a board without a verified EC map (a BIOS-only model, or no
+            // entry at all). Decided before anything is opened, read or written.
+            string refusal = CalibrationRefusal(fans, productId);
+            if(refusal != null) {
+                outcome.FailureReason = refusal;
+                return outcome;
+            }
+
             if(FanArray.HasMaxFanFreeze(productId)) {
                 int beforeLen = profile.Length;
                 profile = profile.Where(p => p < 100).ToArray();
@@ -192,11 +203,15 @@ namespace OmenMon.AppCli {
                 // every sub-100% step (SetRate), but until now nothing put them back —
                 // see the symmetric restore in finally{} for why that matters on boards
                 // that honour the rate register over the level register (issue #74).
+                // W2: what is captured is the rate-WRITE register's own byte, the one
+                // SetRate writes and the restore puts back (it used to be the rate-read
+                // register's, so the restore wrote other bytes into the write registers);
+                // a register that cannot be read is not restored (-1)
                 try {
                     if(fans.Fan != null) {
                         priorRates = new int[fans.Fan.Length];
                         for(int i = 0; i < fans.Fan.Length; i++)
-                            priorRates[i] = fans.Fan[i].GetRate();
+                            priorRates[i] = fans.Fan[i].GetRateWrite();
                         priorRatesCaptured = true;
                     }
                 } catch { priorRatesCaptured = false; }
@@ -223,7 +238,9 @@ namespace OmenMon.AppCli {
                 // SetLevels/SetMax below would silently no-op and the wizard would
                 // collect flat EC dumps and either fail or calibrate against bogus data.
                 try { fans.SetOff(false); } catch { }
-                fans.SetCountdown(600);  // 10 minutes — well over our worst-case run time
+                // As long as the register holds (a byte: 255 s; FanArray clamps it to the
+                // register size, 600 used to land as 600 & 0xFF = 88 s)
+                fans.SetCountdown(600);
 
                 int totalSteps = profile.Length;
                 for(int i = 0; i < totalSteps; i++) {
@@ -374,7 +391,8 @@ namespace OmenMon.AppCli {
                     // reboot, but a board that merely had a sticky rate register recovers.
                     if(priorRatesCaptured && priorRates != null && fans.Fan != null) {
                         for(int i = 0; i < fans.Fan.Length && i < priorRates.Length; i++)
-                            try { fans.Fan[i].SetRate(priorRates[i]); } catch { }
+                            if(priorRates[i] >= 0)
+                                try { fans.Fan[i].SetRate(priorRates[i]); } catch { }
                     }
                     // Hard-coding SetCountdown(0) here would overwrite a non-zero
                     // user countdown (constant-speed mode, an active fan program)
@@ -395,7 +413,20 @@ namespace OmenMon.AppCli {
 #endregion
 
 #region Helpers
-        private static void ApplyLevel(IFanArray fans, int percent) {
+        // Why the wizard does not run on this board, or null if it may (W1)
+        internal static string CalibrationRefusal(IFanArray fans, string productId) {
+            FanControlKind? model = null;
+            if(productId != null && Config.Models != null && Config.Models.TryGetValue(productId, out PlatformPreset preset))
+                model = preset.FanControl;
+            FanControlKind running = fans != null ? fans.Control : (model ?? FanControlKind.Ec);
+            if(BiosFanControl.CalibrationAllowed(model, running))
+                return null;
+            if(model == FanControlKind.Bios || running == FanControlKind.Bios)
+                return "Fan speed on this board comes from the BIOS (0x2D x 100); no calibration needed.";
+            return "This board (" + (productId ?? "?") + ") has no verified EC map. The calibration wizard writes EC registers, so it does not run here; please report the board with 'Copy Diagnostic Info' instead.";
+        }
+
+        internal static void ApplyLevel(IFanArray fans, int percent) {
             if(percent >= 100) {
                 // BIOS SetMaxFan only honours the command when the EC is not in
                 // manual fan-level mode — otherwise the prior SetLevels write
@@ -406,6 +437,9 @@ namespace OmenMon.AppCli {
                 // we re-engage manual on the next sub-100 % step automatically
                 // via SetLevels' Config.FanLevelNeedManual path.
                 try { fans.SetManual(false); } catch { }
+                // W2: 0x27 [1] (GC27, the fan table's last row) only takes effect while a
+                // 0x10 has armed the fans (8C77, measured); arm right before it
+                try { fans.Arm(); } catch { }
                 fans.SetMax(true);
                 return;
             }
@@ -423,15 +457,22 @@ namespace OmenMon.AppCli {
             int level = (int) Math.Round(clamped * Config.FanLevelMax / 100.0);
             level = Math.Max(0, Math.Min(Config.FanLevelMax, level));
             byte fanLevel = (byte) level;
-            try { fans.SetLevels(new byte[] { fanLevel, fanLevel }); } catch { }
+            // W2: never 0/0, whatever the temperature: the lowest a step asks for is the
+            // fan-safety floor (20/22 by default), which the guard would only let go
+            // below while the system is cool (the 0 % step and the verification pass
+            // used to stop both fans for 12 s each)
+            FanSafetyPolicy policy = fans.Guard != null ? fans.Guard.Policy : new FanSafetyPolicy();
+            byte[] request = new byte[] {
+                Math.Max(fanLevel, policy.Floor(0)),
+                Math.Max(fanLevel, policy.Floor(1)) };
+            try { fans.SetLevels(request); } catch { }
             // Also drive the rate registers so we cover both 2022 and 2023+ layouts.
-            // The level write above went through the fan-safety guard, which raises a
-            // step below the floor (the 0 % step) unless the system is cool; the rate
-            // written here is raised to match, so the rate register cannot stop the
-            // fans where the level register may not.
+            // The level write above went through the fan-safety guard (which may raise
+            // it further); the rate written here is raised to match, so the rate
+            // register cannot stop the fans where the level register may not.
             byte[] allowed = fans.Guard != null
-                ? fans.Guard.Filter(new byte[] { fanLevel, fanLevel })
-                : new byte[] { fanLevel, fanLevel };
+                ? fans.Guard.Filter(request)
+                : request;
             for(int i = 0; i < 2; i++) {
                 int rate = clamped;
                 if(allowed[i] > fanLevel && Config.FanLevelMax > 0)
@@ -766,36 +807,39 @@ namespace OmenMon.AppCli {
                 }
             }
 
-            sb.AppendLine();
-            sb.AppendLine("## Raw EC Dumps");
-            sb.AppendLine();
-            foreach(var sample in o.Samples)
-                AppendDumpGrid(sb, $"### Fan @ {sample.LevelPercent}%", sample.Memory);
-            if(o.VerificationSample != null)
-                AppendDumpGrid(sb,
-                    $"### Verification @ {o.VerificationSample.LevelPercent}% (after sweep, fans returning to idle)",
-                    o.VerificationSample.Memory);
+            // W3: no full EC dumps. The report is meant for a public issue, and the EC
+            // holds an ID string, part of the battery serial and the EC's SMBus buffer
+            // (8C77); only the candidate registers' values per step are reported
+            AppendCandidateSteps(sb, o);
 
             return sb.ToString();
         }
 
-        private static void AppendDumpGrid(StringBuilder sb, string heading, byte[] memory) {
-            sb.AppendLine(heading);
-            sb.AppendLine();
-            sb.AppendLine("```");
-            sb.AppendLine("0x _0 _1 _2 _3 _4 _5 _6 _7 _8 _9 _a _b _c _d _e _f");
-            for(int hi = 0; hi <= 0xF0; hi += 0x10) {
-                var row = new StringBuilder();
-                row.Append(((byte) (hi >> 4)).ToString("x"));
-                row.Append("_ ");
-                for(int lo = 0; lo <= 0xF; lo++) {
-                    row.Append(memory[hi | lo].ToString("X2"));
-                    if(lo < 0xF) row.Append(' ');
-                }
-                sb.AppendLine(row.ToString());
+        // The candidate registers' values at each step (and after the verification pass),
+        // the only EC bytes the report contains
+        internal static void AppendCandidateSteps(StringBuilder sb, CalibrationOutcome o) {
+            var candidates = new List<EcDiffScanner.Candidate>();
+            if(o.Scan != null) {
+                candidates.AddRange(o.Scan.All);
+                candidates.AddRange(o.Scan.RejectedByVerification);
             }
-            sb.AppendLine("```");
+            var offsets = candidates.Select(c => c.Offset).Distinct().OrderBy(x => x).ToList();
             sb.AppendLine();
+            sb.AppendLine("## Candidate Registers per Step");
+            sb.AppendLine();
+            if(offsets.Count == 0 || o.Samples.Count == 0) {
+                sb.AppendLine("_No candidate registers. Full EC dumps are not included in this report._");
+                return;
+            }
+            var columns = o.Samples.Select(s => (Label: s.LevelPercent + " %", Memory: s.Memory)).ToList();
+            if(o.VerificationSample != null)
+                columns.Add((Label: "verify " + o.VerificationSample.LevelPercent + " %", Memory: o.VerificationSample.Memory));
+            sb.AppendLine("| Register | " + string.Join(" | ", columns.Select(c => c.Label)) + " |");
+            sb.AppendLine("|----------|" + string.Join("|", columns.Select(c => "------")) + "|");
+            foreach(byte offset in offsets)
+                sb.AppendLine($"| `0x{offset:X2}` | " + string.Join(" | ", columns.Select(c => c.Memory != null && offset < c.Memory.Length ? "`" + c.Memory[offset].ToString("X2") + "`" : "—")) + " |");
+            sb.AppendLine();
+            sb.AppendLine("_Full EC dumps are not included: the EC holds identifiers and battery data._");
         }
 
         private static void AppendCandidate(StringBuilder sb, string label, EcDiffScanner.Candidate c, bool verificationUsed) {
