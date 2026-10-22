@@ -77,9 +77,11 @@ namespace OmenMon.Core {
             get { return (uint[]) this.writeTypes.Clone(); }
         }
 
-        // Whether a command type may be written. Anything else is refused: the firmware
-        // checks no bounds, and many types go straight to SMI (0x52 MUX, 0x53 NVRAM,
-        // 0x29 power limits).
+        // Whether a command type may be written. Anything else is refused, for what the
+        // types do, not for memory safety: the 0xC3 WMI dispatcher copies and bounds every
+        // buffer (rc 5 = size/range; static SMM analysis of 8C77 F.20, 2026-10-22). But
+        // 0x29 commits persistent power limits with no watt clamp, 0x52 switches the
+        // graphics MUX for the next boot, and 0x53 writes a 1-KB NVRAM configuration block.
         public bool MayWrite(uint type) {
             return Array.IndexOf(this.writeTypes, type) >= 0;
         }

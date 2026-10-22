@@ -7,7 +7,8 @@
 //  It contains no fan-level write and no other write type. Every call goes through
 //  ReadBios(), which refuses any type outside ReadOnlyTypes before anything is sent.
 //  Do not add a type to that list without the owner's go and the hardware rules in
-//  CLAUDE.md (0/0 turns both fans off on 8BAC; the firmware checks no bounds).
+//  CLAUDE.md (0/0 turns both fans off on 8BAC, and the firmware passes a fan level on
+//  unclamped; other write types set persistent power limits, the graphics MUX or NVRAM).
 // ===========================================================================================
 //
 // What it proves: a NativeAOT exe can call root\wmi hpqBIntM (signature "SECU") through

@@ -34,11 +34,11 @@ namespace OmenMon.Tests {
         [InlineData(0x2Eu, true)]
         [InlineData(0x1Au, false)]  // fan mode (also writes power limits)
         [InlineData(0x27u, false)]  // Max Fan
-        [InlineData(0x29u, false)]  // CPU power limits, SMI, no bounds
+        [InlineData(0x29u, false)]  // CPU power limits: persistent, no watt clamp
         [InlineData(0x2Fu, false)]
         [InlineData(0x32u, false)]  // fan table write
-        [InlineData(0x52u, false)]  // graphics mode (MUX), SMI
-        [InlineData(0x53u, false)]  // NVRAM, SMI
+        [InlineData(0x52u, false)]  // graphics mode (MUX), for the next boot
+        [InlineData(0x53u, false)]  // a 1-KB NVRAM configuration block
         [InlineData(0u, false)]
         [InlineData(0xFFFFFFFFu, false)]
         public void Omen8Bac_WriteAllowlist(uint type, bool allowed) {

@@ -91,9 +91,9 @@ namespace OmenMon.Core {
             return seconds >= 60 && seconds % 60 == 0 ? seconds / 60 + " min" : seconds + " s";
         }
 
-        // The steps for a board: each level at most the fan table's top for that fan (the
-        // firmware does not check bounds). Null without a sane table maximum (1-100 per
-        // fan): the check does not run without one.
+        // The steps for a board: each level at most the fan table's top for that fan (0x2E
+        // hands the level to the EC as it is, 255 and 0 included; nothing clamps it). Null
+        // without a sane table maximum (1-100 per fan): the check does not run without one.
         public static byte[][] Plan(byte[] tableMaximum) {
             if(tableMaximum == null || tableMaximum.Length < 2 || !PanicLevel.IsComplete(tableMaximum))
                 return null;
