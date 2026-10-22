@@ -19,6 +19,9 @@ namespace OmenMon.Tests.Fakes {
 
         public bool LockFails { get; set; }
 
+        // Registers whose reads fail (as on a lock timeout), the rest read normally
+        public HashSet<byte> FailingReads { get; } = new HashSet<byte>();
+
         public List<(byte Register, byte Value)> Writes { get; } = new List<(byte, byte)>();
 
         // Every register read (a word read records both bytes)
@@ -35,7 +38,7 @@ namespace OmenMon.Tests.Fakes {
         }
 
         public bool TryReadByte(byte register, out byte value) {
-            if(this.LockFails) {
+            if(this.LockFails || this.FailingReads.Contains(register)) {
                 value = 0;
                 return false;
             }

@@ -192,7 +192,7 @@ namespace OmenMon.Hardware.Platform {
         // ones unless a test substitutes them). An EC model gets its registers as before;
         // a BIOS-only model gets none of them (AbsentComponent), its speed is the BIOS
         // speed BIOS 0x2D reports (100 rpm units) and its fan array never reads or writes an
-        // EC fan register.
+        // EC fan register, except a verified mode register, read only.
         internal static FanArray CreateFanArray(PlatformPreset preset, IEcRegisters registers = null, IBiosCtl bios = null) {
 
             // (the rate-write register is readable too: the wizard puts back what it held)
@@ -214,7 +214,9 @@ namespace OmenMon.Hardware.Platform {
                             bios, true) },
                     new AbsentComponent("Countdown"),
                     new AbsentComponent("Manual"),
-                    new AbsentComponent("Mode"),
+                    preset.ModeRegVerified && preset.ModeReg != 0
+                        ? (IPlatformReadWriteComponent) new VerifiedModeComponent(preset.ModeReg, registers)
+                        : new AbsentComponent("Mode"),
                     new AbsentComponent("Switch"),
                     preset.ManualValueOn,
                     preset.ManualValueOff,
@@ -246,7 +248,9 @@ namespace OmenMon.Hardware.Platform {
 
                 new EcComponent(preset.ManualReg, RW, B, int.MaxValue, registers),
 
-                new EcComponent(preset.ModeReg, RW, B, int.MaxValue, registers),
+                preset.ModeRegVerified
+                    ? new VerifiedModeComponent(preset.ModeReg, registers)
+                    : new EcComponent(preset.ModeReg, RW, B, int.MaxValue, registers),
 
                 new EcComponent(preset.SwitchReg, RW, B, int.MaxValue, registers),
 

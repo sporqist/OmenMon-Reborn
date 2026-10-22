@@ -104,6 +104,22 @@ namespace OmenMon.Tests {
             <Model ProductId=""BAD3"" DisplayName=""unknown kind"">
                 <FanControl>Smm</FanControl>
             </Model>
+            <!-- a BIOS-only board with a verified mode register -->
+            <Model ProductId=""8BAC"" DisplayName=""BIOS-only board with OGHM"">
+                <FanControl>Bios</FanControl>
+                <TempCpuReg>178</TempCpuReg>
+                <TempGpuReg>180</TempGpuReg>
+                <ModeReg Verified=""true"">89</ModeReg>
+            </Model>
+            <!-- an unverified mode register on a BIOS-only board is ignored -->
+            <Model ProductId=""BIO2"" DisplayName=""BIOS-only board, unverified mode register"">
+                <FanControl>Bios</FanControl>
+                <ModeReg>149</ModeReg>
+            </Model>
+            <Model ProductId=""BAD4"" DisplayName=""Verified is not a bool"">
+                <FanControl>Bios</FanControl>
+                <ModeReg Verified=""maybe"">89</ModeReg>
+            </Model>
         </Models>
     </Config>
 </OmenMon>
@@ -130,6 +146,11 @@ namespace OmenMon.Tests {
             AssertBios8C77(Config.Models["8C77"]);
             Assert.Equal(FanControlKind.Ec, Config.Models["EC01"].FanControl);
             Assert.Equal(244, Config.Models["EC01"].SwitchReg);
+            Assert.False(Config.Models["EC01"].ModeRegVerified);
+            Assert.True(Config.Models["8BAC"].ModeRegVerified);
+            Assert.Equal(0x59, Config.Models["8BAC"].ModeReg);
+            Assert.False(Config.Models["BIO2"].ModeRegVerified);
+            Assert.Equal(0, Config.Models["BIO2"].ModeReg);
 
             // Unchanged: the file stays as it is
             Config.Save();
@@ -145,8 +166,18 @@ namespace OmenMon.Tests {
             foreach(string reg in new[] { "FanLevelReg", "FanRate", "FanSpeedReg", "CountdownReg", "ManualReg", "ModeReg", "SwitchReg" })
                 Assert.DoesNotContain(reg, entry);
 
+            // The verified mode register is saved with its mark
+            Config.Models["8BAC"].DisplayName = "renamed too";
+            Config.Save();
+            string oghm = Regex.Match(File.ReadAllText(File_), @"<Model ProductId=""8BAC""[\s\S]*?</Model>").Value;
+            Assert.Contains("<ModeReg Verified=\"true\">89</ModeReg>", oghm);
+            Config.Models["8BAC"].DisplayName = "BIOS-only board with OGHM";
+            Config.Save();
+            saved = File.ReadAllText(File_);
+
             Config.Models = new Dictionary<string, PlatformPreset>(StringComparer.OrdinalIgnoreCase);
             Config.Load();
+            Assert.True(Config.Models["8BAC"].ModeRegVerified);
             PlatformPreset again = Config.Models["8C77"];
             Assert.Equal("renamed", again.DisplayName);
             again.DisplayName = "BIOS-only board";
@@ -164,10 +195,12 @@ namespace OmenMon.Tests {
             Assert.False(Config.Models.ContainsKey("BAD1"));
             Assert.False(Config.Models.ContainsKey("BAD2"));
             Assert.False(Config.Models.ContainsKey("BAD3"));
+            Assert.False(Config.Models.ContainsKey("BAD4"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD1") && p.Contains("SwitchReg") && p.Contains("missing"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD2") && p.Contains("FanLevelReg1") && p.Contains("0xZZ"));
             Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD3") && p.Contains("Smm"));
-            Assert.Equal(3, Config.ModelLoadProblems.Count);
+            Assert.Contains(Config.ModelLoadProblems, p => p.Contains("BAD4") && p.Contains("Verified") && p.Contains("maybe"));
+            Assert.Equal(4, Config.ModelLoadProblems.Count);
 
             Config.Save();
             string text = File.ReadAllText(File_);
@@ -213,10 +246,13 @@ namespace OmenMon.Tests {
             Assert.Equal(FanControlKind.Bios, p.FanControl);
             Assert.Equal(0xB2, p.TempCpuReg);
             Assert.Equal(0xB4, p.TempGpuReg);
+            Assert.True(p.ModeRegVerified);
+            Assert.Equal(0x59, p.ModeReg);
 
             using var rig = new TestRig(preset: p);
             BiosOnlySessionTests.Fill8C77Image(rig.Ec, switchByte);
             rig.Ec.Data[0x59] = 0x01;
+            rig.Bios.OnFanMode = m => rig.Ec.Data[0x59] = m;   // GC1A: OGHM = data[1]
             rig.SetCpuTemperature(45);
             rig.Ec.GpuTemperature = 48;
             byte[] image = (byte[]) rig.Ec.Data.Clone();
@@ -224,9 +260,14 @@ namespace OmenMon.Tests {
 
             List<(int, int)> coolOff = BiosOnlySessionTests.RunSession(new GuiSession(rig));
 
+            // 0x59 changes only through the BIOS (0x1A), never by an EC write; the mode it
+            // held at the start (0x01) is replayed from it
             image[FakeEcRegisters.CpuTempRegister] = rig.Ec.Data[FakeEcRegisters.CpuTempRegister];
             image[FakeEcRegisters.GpuTempRegister] = rig.Ec.Data[FakeEcRegisters.GpuTempRegister];
-            BiosOnlySessionTests.AssertBiosOnly(rig, image, coolOff, FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister);
+            image[0x59] = rig.Ec.Data[0x59];
+            BiosOnlySessionTests.AssertBiosOnly(rig, image, coolOff, new byte[] { 0x01 },
+                FakeEcRegisters.CpuTempRegister, FakeEcRegisters.GpuTempRegister, 0x59);
+            Assert.Contains(rig.Bios.Calls, c => c.Type == 0x1A && c.Data[1] == 0x01);
         }
 
         // T4: what the unknown-model prompt saves (Config.SaveModel of the detector's
@@ -261,67 +302,6 @@ namespace OmenMon.Tests {
             using var rig = new TestRig(preset: Config.Models["8C77"]);
             Assert.Equal(FanControlKind.Bios, rig.Platform.Fans.Control);
             Assert.Equal(FanControlKind.Bios, rig.Platform.FanControl);
-        }
-
-        // T7: no BIOS fan mode is ever derived from the mode read back: no SetMode(...)
-        // with GetMode() in its argument, and no value read with GetMode() (a variable or
-        // field assigned from it) passed to SetMode or kept to restore later
-        [Fact]
-        public void Sources_NeverSendAModeReadBack() {
-            string root = AppContext.BaseDirectory;
-            while(!File.Exists(Path.Combine(root, "OmenMon.xml")))
-                root = Path.GetDirectoryName(root)!;
-            Func<string, string> code = f => Regex.Replace(File.ReadAllText(f), @"//.*", "");
-
-            var files = new[] { "App", "Core", "Hardware", "Library" }
-                .Select(d => Path.Combine(root, d))
-                .Where(Directory.Exists)
-                .SelectMany(d => Directory.GetFiles(d, "*.cs", SearchOption.AllDirectories))
-                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
-                    && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
-                .ToList();
-            Assert.Contains(files, f => f.EndsWith("FanProgram.cs"));
-
-            var problems = new List<string>();
-            int setModeCalls = 0;
-            foreach(string file in files) {
-                string text = code(file);
-                string name = Path.GetRelativePath(root, file);
-
-                // Every SetMode( call and its argument (up to the matching parenthesis)
-                foreach(Match m in Regex.Matches(text, @"\bSetMode\s*\(")) {
-                    int depth = 1, i = m.Index + m.Length;
-                    while(i < text.Length && depth > 0) {
-                        if(text[i] == '(') depth++;
-                        else if(text[i] == ')') depth--;
-                        i++;
-                    }
-                    string arg = text.Substring(m.Index + m.Length, Math.Max(0, i - 1 - (m.Index + m.Length)));
-                    setModeCalls++;
-                    if(arg.Contains("GetMode("))
-                        problems.Add(name + ": SetMode(" + arg.Trim() + ")");
-                }
-
-                // Whatever is assigned from GetMode() must not reach SetMode, nor be kept
-                // as the mode to restore
-                foreach(Match m in Regex.Matches(text, @"([\w\.]+)\s*=\s*[^;=]*\bGetMode\s*\(")) {
-                    string target = m.Groups[1].Value;
-                    string last = target.Substring(target.LastIndexOf('.') + 1);
-                    if(last == "Mode" && Regex.IsMatch(target, @"^s\.Mode$"))
-                        continue;  // the GUI snapshot's display value (checked below)
-                    if(Regex.IsMatch(text, @"\bSetMode\s*\([^;]*\b" + Regex.Escape(last) + @"\b")
-                        || Regex.IsMatch(last, "Last|Prior|Saved|Restore", RegexOptions.IgnoreCase))
-                        problems.Add(name + ": " + m.Value.Trim());
-                }
-            }
-
-            Assert.True(setModeCalls >= 5, setModeCalls + " SetMode calls found: is the scan still reading the sources?");
-            Assert.Empty(problems);
-
-            // The snapshot's mode is displayed and never sent: no SetMode in the GUI
-            // takes a snapshot's mode
-            foreach(string file in files.Where(f => f.Contains(Path.DirectorySeparatorChar + "Gui" + Path.DirectorySeparatorChar)))
-                Assert.DoesNotMatch(@"\bSetMode\s*\([^;]*\.Mode\b", code(file));
         }
 
     }

@@ -67,11 +67,12 @@ namespace OmenMon.Hardware.Platform {
         public bool IsEnabled { get; private set; }
         public bool IsSuspended { get; private set; }
 
-        // Last fan mode OmenMon itself sent before the program started (a preset, an
-        // earlier program), restored when it ends; null: none, so nothing is restored.
-        // Never a mode read back from the EC: on a board without a verified EC map the
-        // mode register is something else (8C77: 0x95 is in the battery serial, 0x44),
-        // and 0x1A with that value changes the power limits.
+        // The fan mode in effect before the program started, restored when it ends
+        // (IFanArray.GetModeToReplay: a verified mode register's mode, else the last mode
+        // OmenMon sent); null: none, so nothing is restored. Never a byte from an
+        // unverified register: on a board without a verified mode register it is
+        // something else (8C77: 0x95 is in the battery name, 0x44), and 0x1A with that
+        // value changes the power limits.
         // And the GPU power data before the program started
         private BiosData.FanMode? LastFanMode;
         private BiosData.GpuPowerData LastGpuPowerData;
@@ -154,8 +155,8 @@ namespace OmenMon.Hardware.Platform {
             // Set the state flag
             this.IsEnabled = true;
 
-            // Save the last fan mode OmenMon sent (not one read back)
-            this.LastFanMode = Platform.Fans.LastModeSent;
+            // Save the fan mode to restore (a verified register's, or the last one sent)
+            this.LastFanMode = Platform.Fans.GetModeToReplay();
 
             // Save the last GPU power state
             this.LastGpuPowerData = Platform.System.GetGpuPower();
@@ -187,7 +188,7 @@ namespace OmenMon.Hardware.Platform {
             if(Config.FanLevelNeedManual)
                 Platform.Fans.SetManual(false);
 
-            // Restore the previous fan mode, if OmenMon had sent one
+            // Restore the previous fan mode, if there is one to restore
             RestoreFanMode();
 
             // Restore the previous GPU power settings
@@ -213,7 +214,7 @@ namespace OmenMon.Hardware.Platform {
             if(Config.FanLevelNeedManual)
                 Platform.Fans.SetManual(false);
 
-            // Restore the previous fan mode, if OmenMon had sent one
+            // Restore the previous fan mode, if there is one to restore
             RestoreFanMode();
 
             // Restore the previous GPU power settings
@@ -414,8 +415,8 @@ namespace OmenMon.Hardware.Platform {
 
         }
 
-        // Restores the mode OmenMon had sent before the program started; sends nothing
-        // if there was none
+        // Restores the mode in effect before the program started (see LastFanMode); sends
+        // nothing if there was none
         private void RestoreFanMode() {
             if(this.LastFanMode.HasValue)
                 this.Platform.Fans.SetMode(this.LastFanMode.Value);

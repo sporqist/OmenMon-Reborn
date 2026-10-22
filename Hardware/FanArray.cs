@@ -67,14 +67,22 @@ namespace OmenMon.Hardware.Platform {
         public bool GetManual();
         public void SetManual(bool flag);
 
-        // Retrieves the current fan mode (null: unknown; always on a BIOS-only board,
-        // whose mode register is not known) or sets it. Only modes OmenMon chose (a
-        // preset, a program, the configuration) are ever sent: never one read back
+        // Retrieves the current fan mode (null: unknown; on a BIOS-only board without a
+        // verified mode register always, and from a verified register while it shows no
+        // mode) or sets it. What is sent is a mode OmenMon chose (a preset, a program, the
+        // configuration) or GetModeToReplay(): never a byte from an unverified register
         public BiosData.FanMode? GetMode();
         public void SetMode(BiosData.FanMode mode);
 
         // The last mode OmenMon sent, null if none since start
         public BiosData.FanMode? LastModeSent { get; }
+
+        // Whether the mode register is verified to hold what BIOS 0x1A last sent
+        public bool ModeVerified { get; }
+
+        // The mode a replay may send (ModeReplay.Choose): a verified register's mode, else
+        // the last mode OmenMon sent; null: send nothing
+        public BiosData.FanMode? GetModeToReplay();
 
         // Sends a 0x10 fan-count query now: arms a following 0x2E and keeps a held level
         // alive (not on a fan array that sets levels through the EC)
@@ -104,6 +112,9 @@ namespace OmenMon.Hardware.Platform {
         public BiosData.FanMode? LastModeSent {
             get { return this.lastModeSent as BiosData.FanMode?; }
         }
+
+        // Whether the mode register is verified (see IFanArray)
+        public bool ModeVerified { get; private set; }
 
         // When OmenMon last sent a 0x10 or 0x2E (for the hold countdown of a BIOS-only
         // board), default if never
@@ -165,6 +176,7 @@ namespace OmenMon.Hardware.Platform {
 
             this.bios = bios;
             this.Control = control;
+            this.ModeVerified = fanMode is VerifiedModeComponent;
             this.ManualValueOn  = manualValueOn;
             this.ManualValueOff = manualValueOff;
 
@@ -456,12 +468,48 @@ namespace OmenMon.Hardware.Platform {
         }
 
         // Retrieves the current fan mode from the EC mode register, for display and to
-        // compare with a wanted mode. BIOS-only: unknown (null), never an EC byte
+        // compare with a wanted mode. A verified register: its mode, null while it shows
+        // none (a failed read; 0x00, no 0x1A since boot). BIOS-only without one: unknown
+        // (null), never an EC byte
         public BiosData.FanMode? GetMode() {
+            if(this.ModeVerified)
+                return ToMode(ReadVerifiedMode());
             if(this.Control == FanControlKind.Bios)
                 return null;
             this.Mode.Update();
             return (BiosData.FanMode) this.Mode.GetValue();
+        }
+
+        // The mode a replay may send (see IFanArray)
+        public BiosData.FanMode? GetModeToReplay() {
+            BiosData.FanMode? last = this.LastModeSent;
+            return ToMode(ModeReplay.Choose(
+                this.ModeVerified,
+                this.ModeVerified ? ReadVerifiedMode() : null,
+                last.HasValue ? (int?) (byte) last.Value : null,
+                IsDefinedMode));
+        }
+
+        // The verified register's mode (ModeReplay.RegisterMode), null if there is none
+        private int? ReadVerifiedMode() {
+            if(!(this.Mode is VerifiedModeComponent register))
+                return null;
+            bool ok;
+            int value;
+            try {
+                ok = register.TryReadMode(out value);
+            } catch {
+                return null;
+            }
+            return ModeReplay.RegisterMode(ok, value);
+        }
+
+        private static bool IsDefinedMode(int value) {
+            return value >= 0 && value <= 0xFF && Enum.IsDefined(typeof(BiosData.FanMode), (byte) value);
+        }
+
+        private static BiosData.FanMode? ToMode(int? value) {
+            return value.HasValue ? (BiosData.FanMode?) (BiosData.FanMode) (byte) value.Value : null;
         }
 
         // Sets the current fan mode (BIOS 0x1A). Only a defined mode is sent: one that

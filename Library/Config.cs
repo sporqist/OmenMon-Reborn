@@ -815,6 +815,23 @@ namespace OmenMon.Library {
             preset.TempCpuReg = read(XmlElementTempCpuReg, false, 0);
             preset.TempGpuReg = read(XmlElementTempGpuReg, false, 0);
 
+            // Whether the mode register is verified to hold what BIOS 0x1A last sent
+            // (<ModeReg Verified="true">): only then is a mode read from it sent again. On a
+            // BIOS-only model ModeReg is optional and used only if verified (an unverified
+            // one is ignored, as its other EC registers are)
+            XmlElement modeReg = node[XmlElementModeReg] as XmlElement;
+            if(ok && modeReg != null && modeReg.HasAttribute(XmlAttrModeRegVerified)) {
+                string text = modeReg.GetAttribute(XmlAttrModeRegVerified).Trim();
+                if(text == XmlSaveBoolTrue)
+                    preset.ModeRegVerified = true;
+                else if(text != XmlSaveBoolFalse) {
+                    ok = false;
+                    why = "Model " + productId + ": <" + XmlElementModeReg + "> " + XmlAttrModeRegVerified + " is '" + text + "', expected " + XmlSaveBoolTrue + " or " + XmlSaveBoolFalse;
+                }
+            }
+            if(preset.IsBiosOnly && preset.ModeRegVerified)
+                preset.ModeReg = read(XmlElementModeReg, true, 0);
+
             if(!ok) {
                 problem = why;
                 return false;
@@ -1585,6 +1602,8 @@ namespace OmenMon.Library {
                     mnode.AppendChild(xml.CreateElement(XmlElementTempCpuReg)).InnerText = Conv.GetString((uint) p.TempCpuReg, 1, 10);
                 if(p.TempGpuReg != 0)
                     mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
+                if(p.ModeRegVerified && p.ModeReg != 0)
+                    BuildModeReg(xml, mnode, p);
                 return mnode;
             }
 
@@ -1608,9 +1627,18 @@ namespace OmenMon.Library {
                 mnode.AppendChild(xml.CreateElement(XmlElementTempCpuReg)).InnerText = Conv.GetString((uint) p.TempCpuReg, 1, 10);
             if(p.TempGpuReg != 0)
                 mnode.AppendChild(xml.CreateElement(XmlElementTempGpuReg)).InnerText = Conv.GetString((uint) p.TempGpuReg, 1, 10);
-            mnode.AppendChild(xml.CreateElement(XmlElementModeReg)).InnerText          = Conv.GetString((uint) p.ModeReg, 1, 10);
+            BuildModeReg(xml, mnode, p);
             mnode.AppendChild(xml.CreateElement(XmlElementSwitchReg)).InnerText        = Conv.GetString((uint) p.SwitchReg, 1, 10);
             return mnode;
+        }
+
+        // Adds a model's <ModeReg>, marked Verified="true" if it is
+        private static void BuildModeReg(XmlDocument xml, XmlElement mnode, OmenMon.Hardware.Platform.PlatformPreset p) {
+            XmlElement mode = xml.CreateElement(XmlElementModeReg);
+            if(p.ModeRegVerified)
+                mode.SetAttribute(XmlAttrModeRegVerified, XmlSaveBoolTrue);
+            mode.InnerText = Conv.GetString((uint) p.ModeReg, 1, 10);
+            mnode.AppendChild(mode);
         }
 
         // Adds or updates a model preset in the dictionary and persists to XML

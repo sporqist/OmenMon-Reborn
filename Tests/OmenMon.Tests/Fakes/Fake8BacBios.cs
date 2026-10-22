@@ -54,6 +54,9 @@ namespace OmenMon.Tests.Fakes {
 
         public BiosData.FanMode? LastFanMode { get; private set; }
 
+        // Called with data[1] of every 0x1A (8BAC/8C77 ACPI: GC1A writes it into EC 0x59)
+        public Action<byte>? OnFanMode { get; set; }
+
         private DateTime? lastQueryAt;
         private byte[]? active;
         private DateTime activeRefreshedAt;
@@ -148,6 +151,7 @@ namespace OmenMon.Tests.Fakes {
 
                 case 0x1A: // Fan mode
                     this.LastFanMode = (BiosData.FanMode) data[1];
+                    this.OnFanMode?.Invoke(data[1]);
                     return 0;
 
                 case 0x26: // Max Fan status: never on

@@ -469,12 +469,16 @@
                  ACPI map they are other data (read 2026-10-22): 0x62 SMAD = 0x16 and 0x63 SMCM = 0x20 are the EC's
                  SMBus host address (the battery, 0x0B shifted left) and command (SBS ManufacturerName), with the
                  SMBus data block from 0x64; the rate registers 0x2E/0x2F and 0x3A/0x3B are inside BCTL (0x2D-0x3C,
-                 a 16-byte battery string); 0xF4 (the fan-off switch) has no field and reads 0x00; 0x59 is OGHM, the
-                 thermal policy byte (0x01). -->
+                 a 16-byte battery string); 0xF4 (the fan-off switch) has no field and reads 0x00.
+                 Mode register: EC 0x59 (OGHM), verified from the ACPI tables: the method behind BIOS 0x1A (GC1A)
+                 writes its data[1] verbatim into OGHM, notifies NPCF and, on AC, sets the power limits from bit 0;
+                 nothing else writes it. So 0x59 reads the mode last sent, and a mode read from it may be sent again
+                 (a program's restore, constant speed). 0x00 there means no 0x1A since boot (shown as unknown). -->
             <Model ProductId="8BAC" DisplayName="HP Omen 16 (2023, wf0xxx, 8BAC)">
                 <FanControl>Bios</FanControl>
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
+                <ModeReg Verified="true">89</ModeReg>
             </Model>
             <!-- 8C77: HP OMEN 16 (2024, wf1xxx), BIOS F.20. BIOS fan control only: no EC fan register is read or written.
                  Measured on the board (2026-10-21/22, fan test, ear test, ACPI tables via acpiexec, cross-checked live):
@@ -500,6 +504,7 @@
                 <FanControl>Bios</FanControl>
                 <TempCpuReg>178</TempCpuReg>
                 <TempGpuReg>180</TempGpuReg>
+                <!-- <ModeReg Verified="true">89</ModeReg> pending: confirm 0x1A writes EC 0x59 on 8C77 (C3) -->
             </Model>
             <!-- 8A25: HP Victus 16-d1xxx (2022, 12th gen Intel) — GetMaxFan=True sets 0xFF at 0x34/0x35; rate regs confirmed at 0x2E/0x2F; Fan2=Unsupported -->
             <Model ProductId="8A25" DisplayName="HP Victus 16 (2022, d1xxx)">

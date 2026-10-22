@@ -178,12 +178,20 @@ namespace OmenMon.Tests {
         // OmenMon chose (never the 0x44 the default mode register holds), and 0x2E [0, 0]
         // only inside a cool Fan Off request
         internal static void AssertBiosOnly(TestRig rig, byte[] image, List<(int From, int To)> coolOff, params byte[] tempRegisters) {
+            AssertBiosOnly(rig, image, coolOff, Array.Empty<byte>(), tempRegisters);
+        }
+
+        // The same, with modes a verified mode register may add (its value at the start:
+        // replayed from it) and the registers that may be read (temperatures, the
+        // verified mode register)
+        internal static void AssertBiosOnly(TestRig rig, byte[] image, List<(int From, int To)> coolOff, IEnumerable<byte> registerModes, params byte[] readable) {
 
             Assert.Empty(rig.Ec.Writes);
             Assert.Equal(image, rig.Ec.Data);
-            Assert.Empty(rig.Ec.Reads.Except(tempRegisters));
+            Assert.Empty(rig.Ec.Reads.Except(readable));
 
             HashSet<byte> allowed = AllowedModes();
+            allowed.UnionWith(registerModes);
             var modes = rig.Bios.Calls.Where(c => c.Type == 0x1A).Select(c => c.Data[1]).ToList();
             Assert.NotEmpty(modes);
             Assert.All(modes, m => Assert.Contains(m, allowed));

@@ -129,6 +129,42 @@ namespace OmenMon.Core {
 
     }
 
+    // Which fan mode may be sent again (a fan program restoring the mode it found, constant
+    // speed re-sending the mode so the levels apply). A mode read from the EC is sent only
+    // from a mode register verified to hold what BIOS 0x1A last sent: on 8BAC and 8C77 the
+    // ACPI method behind 0x1A (GC1A) writes its data[1] verbatim into EC 0x59 (OGHM) and
+    // nothing else writes it. Any other register is not a mode (8C77's default ModeReg
+    // 0x95 is in the battery name and reads 0x44, and 0x1A with that changes the power
+    // limits), so without a verified register only the mode OmenMon itself last sent is
+    // re-sent, or nothing.
+    public static class ModeReplay {
+
+        // What a verified mode register holds while no 0x1A has run since boot (8C77 reads
+        // 0x00 then): the BIOS default, not a mode. 0x00 is a defined mode number
+        // (LegacyDefault), but sending it is not a replay: on AC 0x1A also sets the power
+        // limits (bit 0 clear: PL1 55 W), which the boot default need not have
+        public const int NoModeSinceBoot = 0x00;
+
+        // The mode a verified register shows: its value, or null (unknown) if the read
+        // failed or it holds NoModeSinceBoot
+        public static int? RegisterMode(bool readOk, int value) {
+            if(!readOk || value == NoModeSinceBoot || value < 0 || value > 0xFF)
+                return null;
+            return value;
+        }
+
+        // The mode to send again: from a verified register, its mode if it is a defined
+        // one (an undefined byte: nothing); if the verified register shows none (failed
+        // read, nothing since boot), or there is no verified register, the last mode
+        // OmenMon sent (null: nothing)
+        public static int? Choose(bool registerVerified, int? registerMode, int? lastSent, Func<int, bool> isDefined) {
+            if(registerVerified && registerMode.HasValue)
+                return isDefined != null && isDefined(registerMode.Value) ? registerMode : null;
+            return lastSent;
+        }
+
+    }
+
     // Printable ASCII in an EC image: a register inside a run of printable characters is
     // most likely part of a string (an ID, a battery name, the EC's SMBus buffer), not a
     // fan or temperature register. Temperatures between 32 and 126 are printable too, so

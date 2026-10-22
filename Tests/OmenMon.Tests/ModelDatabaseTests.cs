@@ -39,7 +39,7 @@ namespace OmenMon.Tests {
         };
 
         // A BIOS-only model (<FanControl>Bios</FanControl>) has none of the register
-        // elements: it never uses an EC fan register
+        // elements (it never uses an EC fan register), except a verified mode register
         private static bool IsBiosOnly(XElement model) {
             return ((string?) model.Element("FanControl"))?.Trim() == "Bios";
         }
@@ -107,6 +107,13 @@ namespace OmenMon.Tests {
             foreach(var elementName in RequiredRegisterElements) {
                 var node = model.Element(elementName);
                 if(IsBiosOnly(model)) {
+                    // The one exception: a mode register verified to hold what 0x1A sent
+                    // (read only, never written)
+                    if(node is not null && elementName == "ModeReg" && (string?) node.Attribute("Verified") == "true") {
+                        if(!byte.TryParse(node.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                            errors.Add($"[{tag}] <ModeReg> has invalid byte value '{node.Value}'.");
+                        continue;
+                    }
                     if(node is not null)
                         errors.Add($"[{tag}] BIOS-only model has an EC fan register <{elementName}>.");
                     continue;

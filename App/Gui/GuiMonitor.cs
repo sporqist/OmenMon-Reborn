@@ -291,8 +291,9 @@ namespace OmenMon.AppGui {
             s.MaxTemp = plat.GetMaxTemperature(false); // temps already refreshed above
 
             // The dynamic-icon warm/cool background needs the fan mode even with the form
-            // hidden, so it is always sampled. A BIOS-only board has no mode register: it
-            // shows the last mode OmenMon sent (display only, never sent back)
+            // hidden, so it is always sampled. A BIOS-only board without a verified mode
+            // register (or one that shows no mode yet: 0x00, no 0x1A since boot) shows the
+            // last mode OmenMon sent (display only, never sent back)
             s.Mode = plat.Fans.GetMode() ?? plat.Fans.LastModeSent;
 
             // Cheap state (no EC except the BIOS-on-battery branch of IsFullPowerConfirmed)

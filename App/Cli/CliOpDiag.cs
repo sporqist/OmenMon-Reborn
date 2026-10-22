@@ -235,6 +235,9 @@ namespace OmenMon.AppCli {
                 var fans = platform.Fans;
 
                 sb.AppendLine($"- Fan control: `{fans.Control}`" + (fans.Control == OmenMon.Core.FanControlKind.Bios ? " (no EC fan register is read or written; RPM = BIOS 0x2D speed x 100)" : ""));
+                sb.AppendLine(fans.ModeVerified
+                    ? "- Mode register: verified (it holds what BIOS 0x1A last sent; a mode read from it may be sent again)"
+                    : "- Mode register: not verified (never sent back; only the mode OmenMon last sent is re-sent)");
                 sb.AppendLine($"- Mode: `{(fans.GetMode()?.ToString() ?? "unknown")}`, Manual: `{fans.GetManual()}`, Max: `{fans.GetMax()}`, Off: `{fans.GetOff()}`, Countdown: `{fans.GetCountdown()}` s");
                 if(platform.UnverifiedEcLayout)
                     sb.AppendLine("- **Warning:** no model entry, and the BIOS fan interface does not answer: the default EC layout is used, not verified for this board");

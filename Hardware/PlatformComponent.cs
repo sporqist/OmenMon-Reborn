@@ -449,6 +449,23 @@ namespace OmenMon.Hardware.Platform {
 
     }
 
+    // A mode register verified to hold what BIOS 0x1A last sent (the model entry's
+    // <ModeReg Verified="true">; 8BAC and 8C77: EC 0x59 OGHM, which the ACPI method behind
+    // 0x1A writes verbatim). Read only: the mode is set through the BIOS, never the EC.
+    // TryReadMode tells a failed read apart from a value (Update() does not).
+    public sealed class VerifiedModeComponent : EcComponent {
+
+        public VerifiedModeComponent(byte register, IEcRegisters registers = null)
+            : base(register, PlatformData.AccessType.Read, PlatformData.DataSize.Byte, int.MaxValue, registers) {
+            SetName("Mode");
+        }
+
+        public bool TryReadMode(out int value) {
+            return TryReadRegister(out value);
+        }
+
+    }
+
     // A GPU temperature from the graphics driver. TryRead gives a temperature only while
     // the dGPU is awake (it must never wake a parked one); false otherwise or if the
     // driver cannot be read.

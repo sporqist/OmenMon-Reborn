@@ -38,6 +38,12 @@ namespace OmenMon.Hardware.Platform {
         public byte ModeReg;         // HPCM — performance mode preset
         public byte SwitchReg;       // SFAN — fan off switch
 
+        // Whether ModeReg is verified to hold what BIOS 0x1A last sent (<ModeReg
+        // Verified="true">): only then is a mode read from it ever sent again (ModeReplay).
+        // On a BIOS-only model ModeReg is used only if verified (8BAC and 8C77: 0x59 OGHM,
+        // which the ACPI method behind 0x1A writes verbatim), read only
+        public bool ModeRegVerified;
+
         // Per-model manual-mode trigger values. The standard OMCC register at 0x62 responds
         // to FanManual.On / .Off (0x06 / 0x00); some 2023+ HP boards ignore the legacy OMCC
         // bit and gate manual fan control on a different register/value pair entirely

@@ -127,10 +127,10 @@ namespace OmenMon.Hardware.Platform {
                         // (the fan-safety guard floors a zero while warm)
                         fans.SetLevels(new byte[] { level0, level1 });
 
-                        // Re-send the fan mode so that the settings are applied (EC
-                        // boards). Only the mode OmenMon itself last sent: re-sending the
-                        // mode read back from the EC sent whatever byte the mode register
-                        // held (8C77: 0x44, from the battery serial) to BIOS 0x1A
+                        // Re-send the fan mode so that the settings are applied: a
+                        // verified mode register's mode, else the mode OmenMon itself last
+                        // sent (ReapplyMode). Re-sending an unverified register's byte sent
+                        // whatever it held (8C77: 0x44, from the battery name) to BIOS 0x1A
                         ReapplyMode(fans);
 
                     }
@@ -156,19 +156,22 @@ namespace OmenMon.Hardware.Platform {
 
         }
 
-        // Re-sends the last mode OmenMon sent, on an EC model; nothing on a BIOS-only one
-        // (its levels need no mode write) or if OmenMon has sent none
+        // Re-sends the mode in effect (IFanArray.GetModeToReplay: a verified mode
+        // register's mode, else the last mode OmenMon sent; nothing if neither). A
+        // BIOS-only model only with a verified mode register (as an EC model before it,
+        // 8BAC re-sent its real mode, 0x59); without one nothing (its levels need no mode
+        // write)
         public static void ReapplyMode(IFanArray fans) {
-            if(fans.Control != FanControlKind.Ec)
+            if(fans.Control != FanControlKind.Ec && !fans.ModeVerified)
                 return;
-            BiosData.FanMode? mode = fans.LastModeSent;
+            BiosData.FanMode? mode = fans.GetModeToReplay();
             if(mode.HasValue)
                 fans.SetMode(mode.Value);
         }
 
         // The constant-speed countdown maintenance the monitor runs on every pass while
         // constant speed is active. EC model: extend the EC countdown when it runs low (and
-        // re-send the last mode OmenMon sent, see ReapplyMode). BIOS-only: nothing; there
+        // re-send the mode in effect, see ReapplyMode). BIOS-only: nothing; there
         // is no countdown register, and the 0x10 heartbeat keeps the level alive.
         public static void MaintainConstantSpeed(IFanArray fans) {
             if(fans.Control != FanControlKind.Ec)
