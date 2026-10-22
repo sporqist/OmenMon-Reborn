@@ -16,15 +16,16 @@ namespace OmenMon.AppCli {
     // Implements the main operation loop in the application's CLI mode
     // This part covers -FanCheck: the BIOS-only fan check (FanCheckRunner), which takes
     // the calibration wizard's place on a BIOS-only board. It needs the fans to itself, so
-    // it does not run while the OmenMon GUI runs; Ctrl+C stops it, and it always hands
-    // control back to the BIOS.
+    // it does not run while the OmenMon GUI runs; Ctrl+C stops it. After a normal run it
+    // holds the floor until the GUI starts (then it exits without another write) or until
+    // Ctrl+C, a key or the hold's time hands control back to the BIOS.
     public static partial class CliOp {
 
         public static string FanCheckDefaultFileName(DateTime time) {
             return "OmenMon-FanCheck-" + time.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".csv";
         }
 
-        private static void FanCheckRun(string file) {
+        private static void FanCheckRun(int holdSeconds, string file) {
 
             if(GuiRunning()) {
                 Cli.PrintError("OmenMon is running and controls the fans: exit it first (OmenMon -Exit)");
@@ -52,13 +53,15 @@ namespace OmenMon.AppCli {
                 };
                 Console.CancelKeyPress += onCancel;
                 Console.WriteLine("Fan check: 5 steps of " + OmenMon.Core.FanCheck.StepSeconds
-                    + " s, stops at " + OmenMon.Core.FanCheck.AbortTemperature + " °C (Ctrl+C stops it; the fans go back to the BIOS)");
+                    + " s, stops at " + OmenMon.Core.FanCheck.AbortTemperature + " °C (Ctrl+C stops it; the fans go back to the BIOS),"
+                    + " then holds the floor level until OmenMon starts");
 
                 FanCheckResult result;
                 try {
                     result = FanCheckRunner.Run(platform,
                         seconds => stop.Token.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds)),
-                        Console.WriteLine, stop.Token);
+                        Console.WriteLine, stop.Token,
+                        new FanCheckHold { Seconds = holdSeconds, GuiStarted = GuiRunning, KeyPressed = FanCheckKeyPressed });
                 } finally {
                     Console.CancelKeyPress -= onCancel;
                 }
@@ -79,6 +82,21 @@ namespace OmenMon.AppCli {
                 if(result.Aborted)
                     Environment.ExitCode = 1;
             }
+        }
+
+        // Whether a key was pressed since the last call, consuming every key waiting
+        // (never with no console to read keys from)
+        private static bool FanCheckKeyPressed() {
+            bool pressed = false;
+            try {
+                if(Console.IsInputRedirected)
+                    return false;
+                while(Console.KeyAvailable) {
+                    Console.ReadKey(true);
+                    pressed = true;
+                }
+            } catch(InvalidOperationException) { }
+            return pressed;
         }
 
     }

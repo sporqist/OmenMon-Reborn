@@ -16,6 +16,12 @@ namespace OmenMon.Core {
     // through the fan-safety guard; 0x2D read every second; it stops at
     // AbortTemperature (or when the temperature is unknown), raises the fans to the table
     // maximum and hands control back to the BIOS.
+    //
+    // A normal run does not end with the hand-back: the BIOS curve stops both fans at
+    // light load (8BAC, 2026-10-22: 0/0 for 57 s and counting at 46 °C once the
+    // hand-back level from 60/63 expired). It holds the fan-safety floor instead, with
+    // the same keep-alive and supervision, until the OmenMon GUI starts (it takes over),
+    // or Ctrl+C, a key or HoldDefaultSeconds hand back to the BIOS.
     public static class FanCheck {
 
         // The levels [cpu, gpu], in rpm / 100
@@ -38,6 +44,50 @@ namespace OmenMon.Core {
 
         // How many of a step's last samples make up its settled value and jitter
         public const int SettleSamples = 5;
+
+        // How long the floor is held after a normal run [s]: by default, and at most
+        // (-FanCheck [<Seconds>]; 0 hands back at once)
+        public const int HoldDefaultSeconds = 600;
+        public const int HoldMaxSeconds = 3600;
+
+        // -FanCheck's arguments, in any order: the hold [s] (digits only, at most
+        // HoldMaxSeconds) and the CSV file; false for anything else
+        public static bool TryParseArgs(IList<string> args, out int holdSeconds, out string file) {
+            holdSeconds = HoldDefaultSeconds;
+            file = null;
+            bool haveSeconds = false;
+            foreach(string a in args) {
+                if(IsDigits(a)) {
+                    if(haveSeconds || a.Length > 5)
+                        return false;
+                    int value = 0;
+                    foreach(char ch in a)
+                        value = value * 10 + (ch - '0');
+                    if(value > HoldMaxSeconds)
+                        return false;
+                    holdSeconds = value;
+                    haveSeconds = true;
+                } else if(file == null)
+                    file = a;
+                else
+                    return false;
+            }
+            return true;
+        }
+
+        private static bool IsDigits(string text) {
+            if(string.IsNullOrEmpty(text))
+                return false;
+            foreach(char ch in text)
+                if(ch < '0' || ch > '9')
+                    return false;
+            return true;
+        }
+
+        // The hold's length as the hint shows it: "10 min", "90 s"
+        public static string HoldText(int seconds) {
+            return seconds >= 60 && seconds % 60 == 0 ? seconds / 60 + " min" : seconds + " s";
+        }
 
         // The steps for a board: each level at most the fan table's top for that fan (the
         // firmware does not check bounds). Null without a sane table maximum (1-100 per
@@ -82,6 +132,16 @@ namespace OmenMon.Core {
             return new FanCheckFanResult(target, rise, settled, jitter);
         }
 
+    }
+
+    // How the hold after a normal run ended
+    public enum FanCheckHoldEnd {
+        None,           // no hold: the run did not end normally
+        GuiStarted,     // the OmenMon GUI took over the fans: nothing written after it
+        CtrlC,          // handed back
+        Key,            // handed back
+        Timeout,        // handed back
+        Aborted         // the abort path (85 °C, the temperature stopped reading)
     }
 
     // One fan over one step: the level written, the seconds until 0x2D first came within

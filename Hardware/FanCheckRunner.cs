@@ -40,18 +40,35 @@ namespace OmenMon.Hardware.Platform {
         public string AbortReason;
         public bool Raised;                     // the abort raised the fans to the table maximum
         public bool HandedBack;
+        public FanCheckHoldEnd HoldEnd;         // how the hold after a normal run ended (None: no hold)
+        public int HoldSeconds;                 // how long it lasted
+        public byte[] HoldLevel;                // what the floor request wrote (the guard may raise it)
         public byte[] TableMaximum;
         public List<FanCheckSample> Samples = new List<FanCheckSample>();
         public List<FanCheckStep> Steps = new List<FanCheckStep>();
     }
 
+    // The hold after a normal run: how long until the hand-back, and what ends it early
+    public sealed class FanCheckHold {
+        public int Seconds = FanCheck.HoldDefaultSeconds;
+        public Func<bool> GuiStarted;           // whether the OmenMon GUI runs (null: never)
+        public Func<bool> KeyPressed;           // whether a key was pressed since the last call,
+                                                // consuming them (null: never)
+    }
+
     // The BIOS-only fan check (FanCheck has the rules). Every level goes through the fan
     // array, so through the fan-safety guard (SafeLevel): the steps, the keep-alive (0x10
-    // only), supervision, the abort level (the table maximum). It reads nothing from the
-    // EC but the temperatures the platform reads anyway (no dump), and it always ends by
-    // handing control back to the BIOS (the existing hand-back: a safe last level, then
-    // silence). waitSeconds waits (the CLI: real time; the tests: simulated).
+    // only), supervision, the abort level (the table maximum), the floor held after the
+    // steps. It reads nothing from the EC but the temperatures the platform reads anyway
+    // (no dump). It ends by handing control back to the BIOS (the existing hand-back: a
+    // safe last level, then silence), except when the OmenMon GUI starts during the hold:
+    // the GUI then has the fans, and nothing more is written. waitSeconds waits (the CLI:
+    // real time; the tests: simulated).
     public static class FanCheckRunner {
+
+        // Printed with every hand-back that did not raise the fans
+        public const string HandBackWarning = "Warning: the BIOS curve may stop both fans at light load"
+            + " (8BAC: 0/0 at 46 °C once the last level expired); start OmenMon to keep them turning";
 
         // Why the check does not run on these fans, or null
         public static string Refusal(IFanArray fans) {
@@ -65,7 +82,8 @@ namespace OmenMon.Hardware.Platform {
         }
 
         public static FanCheckResult Run(Platform platform, Action<int> waitSeconds,
-            Action<string> progress = null, CancellationToken cancel = default(CancellationToken)) {
+            Action<string> progress = null, CancellationToken cancel = default(CancellationToken),
+            FanCheckHold hold = null) {
 
             var result = new FanCheckResult();
             progress = progress ?? (s => { });
@@ -92,6 +110,7 @@ namespace OmenMon.Hardware.Platform {
                 return result;
             }
 
+            bool handBack = true;
             try {
                 for(int s = 0; s < plan.Length && !result.Aborted; s++) {
 
@@ -129,12 +148,101 @@ namespace OmenMon.Hardware.Platform {
 
                     result.Steps.Add(Summarize(s + 1, target, stepSamples));
                 }
+
+                if(!result.Aborted)
+                    handBack = Hold(result, platform, waitSeconds, progress, cancel, hold ?? new FanCheckHold());
+
             } finally {
-                fans.Release();
-                result.HandedBack = true;
+                if(handBack) {
+                    fans.Release();
+                    result.HandedBack = true;
+                }
             }
 
             return result;
+        }
+
+        // Holds the floor after a normal run (FanCheck says why) with the steps' keep-alive
+        // and supervision. False when the OmenMon GUI took over (nothing may be written any
+        // more), true when control goes back to the BIOS: Ctrl+C, a key, the time is up,
+        // or the abort path (the fans raised first).
+        private static bool Hold(FanCheckResult result, Platform platform, Action<int> waitSeconds,
+            Action<string> progress, CancellationToken cancel, FanCheckHold hold) {
+
+            IFanArray fans = platform.Fans;
+            FanSafetyGuard guard = fans.Guard;
+            Func<bool> guiStarted = hold.GuiStarted ?? (() => false);
+            Func<bool> keyPressed = hold.KeyPressed ?? (() => false);
+
+            if(guiStarted()) {
+                result.HoldEnd = FanCheckHoldEnd.GuiStarted;
+                progress("OmenMon is running and has the fans: exiting without another write");
+                return false;
+            }
+            if(hold.Seconds <= 0 || cancel.IsCancellationRequested) {
+                result.HoldEnd = hold.Seconds <= 0 ? FanCheckHoldEnd.Timeout : FanCheckHoldEnd.CtrlC;
+                return true;
+            }
+
+            // The floor: the policy's minimum per fan (10-100 by the configuration), so
+            // never 0/0 or 255; the guard raises it while warm
+            byte[] floor = { guard.Policy.Floor(0), guard.Policy.Floor(1) };
+            fans.SetLevels(new byte[] { floor[0], floor[1] });
+            result.HoldLevel = guard.Written;
+            keyPressed();   // A key pressed during the steps does not end the hold
+            progress("Fan check done. Holding the floor level " + floor[0] + "/" + floor[1]
+                + (result.HoldLevel != null && (result.HoldLevel[0] != floor[0] || result.HoldLevel[1] != floor[1])
+                    ? " (raised to " + result.HoldLevel[0] + "/" + result.HoldLevel[1] + " while warm)" : "")
+                + " until OmenMon starts (start it now) or Ctrl+C / any key / "
+                + FanCheck.HoldText(hold.Seconds) + " to hand back to the BIOS.");
+
+            for(int second = 1; ; second++) {
+
+                waitSeconds(1);
+                result.HoldSeconds = second;
+
+                // The GUI has the fans now: not even a keep-alive
+                if(guiStarted()) {
+                    result.HoldEnd = FanCheckHoldEnd.GuiStarted;
+                    progress("OmenMon started and takes over the fans after " + second + " s: exiting without another write");
+                    return false;
+                }
+
+                platform.UpdateTemperature();
+                int? hottest = guard.Hottest();
+                if(FanCheck.MustAbort(hottest)) {
+                    Abort(result, fans, hottest.HasValue
+                        ? FanCheck.AbortTemperature + " °C reached during the hold (" + hottest.Value + " °C)"
+                        : "The temperature stopped reading during the hold");
+                    result.HoldEnd = FanCheckHoldEnd.Aborted;
+                    return true;
+                }
+
+                FanCheckHoldEnd end = cancel.IsCancellationRequested ? FanCheckHoldEnd.CtrlC
+                    : keyPressed() ? FanCheckHoldEnd.Key
+                    : second >= hold.Seconds ? FanCheckHoldEnd.Timeout
+                    : FanCheckHoldEnd.None;
+                if(end != FanCheckHoldEnd.None) {
+                    result.HoldEnd = end;
+                    progress("Hold ended after " + second + " s (" + HoldEndText(end) + "): handing the fans back to the BIOS");
+                    return true;   // The report has the warning
+                }
+
+                if(second % FanCheck.KeepAliveSeconds == 0)
+                    fans.Arm();
+                fans.Supervise();
+            }
+        }
+
+        private static string HoldEndText(FanCheckHoldEnd end) {
+            switch(end) {
+                case FanCheckHoldEnd.GuiStarted: return "OmenMon started";
+                case FanCheckHoldEnd.CtrlC: return "Ctrl+C";
+                case FanCheckHoldEnd.Key: return "a key";
+                case FanCheckHoldEnd.Timeout: return "time up";
+                case FanCheckHoldEnd.Aborted: return "the check stopped";
+                default: return "-";
+            }
         }
 
         // Stops the check: the fans to the fan table's maximum (through the guard), then
@@ -202,9 +310,17 @@ namespace OmenMon.Hardware.Platform {
                     s.CpuMin.HasValue ? s.CpuMin + "-" + s.CpuMax : "-"));
             if(r.Aborted)
                 sb.AppendLine("Stopped: " + r.AbortReason + (r.Raised ? "; the fans were raised to the table maximum" : ""));
-            sb.AppendLine(r.HandedBack
-                ? "Control handed back to the BIOS (the last level holds about 2 minutes, then the BIOS curve runs)"
-                : "Control NOT handed back");
+            if(r.HoldEnd != FanCheckHoldEnd.None)
+                sb.AppendLine("Hold: " + (r.HoldLevel != null ? r.HoldLevel[0] + "/" + r.HoldLevel[1] : "-")
+                    + " for " + r.HoldSeconds + " s, ended: " + HoldEndText(r.HoldEnd));
+            if(r.HandedBack) {
+                sb.AppendLine("Control handed back to the BIOS (the last level holds about 2 minutes, then the BIOS curve runs)");
+                if(!r.Raised)
+                    sb.AppendLine(HandBackWarning);
+            } else
+                sb.AppendLine(r.HoldEnd == FanCheckHoldEnd.GuiStarted
+                    ? "Control left to OmenMon (nothing written after it started)"
+                    : "Control NOT handed back");
             return sb.ToString();
         }
 
